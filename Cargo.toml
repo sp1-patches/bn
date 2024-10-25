@@ -25,7 +25,7 @@ byteorder = { version = "1.0", features = ["i128"], default-features = false }
 crunchy = "0.2.1"
 lazy_static = { version = "1.4.0", features = ["spin_no_std"] }
 rustc-hex = { version = "2", default-features = false }
-sp1-lib = { git = "https://github.com/succinctlabs/sp1.git", branch = "dev" }
+sp1-lib = "3.0.0"
 cfg-if = "1.0.0"
 bytemuck = { version = "1.16.1", features = ["derive"] }
 
