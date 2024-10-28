@@ -256,18 +256,14 @@ impl FieldElement for Fq2 {
         // "High-Speed Software Implementation of the Optimal Ate Pairing
         // over Barreto–Naehrig Curves"; Algorithm 8
 
-        match (self
-            .c0
+        self.c0
             .mul(self.c0)
-            .sub((self.c1.mul(self.c1)).mul(fq_non_residue())))
-        .inverse_unconstrained()
-        {
-            Some(t) => Some(Fq2 {
-                c0: self.c0.mul(t),
-                c1: (self.c1.mul(t)).cpu_neg(),
-            }),
-            None => None,
-        }
+            .sub((self.c1.mul(self.c1)).mul(fq_non_residue()))
+            .inverse_unconstrained()
+            .map(|t| Fq2 {
+                c0: self.c0.cpu_mul(t),
+                c1: (self.c1.cpu_mul(t)).cpu_neg(),
+            })
     }
 
     fn inverse_unconstrained(self) -> Option<Self> {
