@@ -132,12 +132,6 @@ impl Fr {
 
     #[inline]
     #[allow(dead_code)]
-    pub fn inv(&self) -> u128 {
-        unimplemented!("n' inverse is not used")
-    }
-
-    #[inline]
-    #[allow(dead_code)]
     pub fn raw(&self) -> &U256 {
         unimplemented!("raw representation is not in Montgomery form")
     }
@@ -152,6 +146,16 @@ impl Fr {
         self.0.mul(&other.0, &Self::modulus());
 
         self
+    }
+
+    // This is used for arithmetic in unconstrained mode
+    fn cpu_inverse(mut self) -> Option<Self> {
+        if self.is_zero() {
+            None
+        } else {
+            self.0.invert(&Self::modulus());
+            Some(self)
+        }
     }
 }
 
@@ -175,22 +179,13 @@ impl FieldElement for Fr {
         self.0.is_zero()
     }
 
-    fn inverse(mut self) -> Option<Self> {
-        if self.is_zero() {
-            None
-        } else {
-            self.0.invert(&Self::modulus());
-            Some(self)
-        }
-    }
-
-    fn inverse_unconstrained(self) -> Option<Self> {
+    fn inverse(self) -> Option<Self> {
         #[cfg(target_os = "zkvm")]
         {
             // Compute the inverse using the zkvm syscall
             sp1_lib::unconstrained! {
                 let mut buf = [0u8; 33];
-                self.inverse().map(|inv| {
+                self.cpu_inverse().map(|inv| {
                     let bytes = cast::<[u128; 2], [u8; 32]>(inv.0.0);
                     buf[0..32].copy_from_slice(&bytes);
                     buf[32] = 1;
@@ -211,7 +206,7 @@ impl FieldElement for Fr {
         }
         #[cfg(not(target_os = "zkvm"))]
         {
-            self.inverse()
+            self.cpu_inverse()
         }
     }
 }
@@ -459,12 +454,6 @@ impl Fq {
 
     #[inline]
     #[allow(dead_code)]
-    pub fn inv(&self) -> u128 {
-        unimplemented!("n' inverse is not used")
-    }
-
-    #[inline]
-    #[allow(dead_code)]
     pub fn raw(&self) -> &U256 {
         unimplemented!("raw representation is not in Montgomery form")
     }
@@ -499,6 +488,17 @@ impl Fq {
     pub(crate) fn cpu_neg(mut self) -> Fq {
         self.0.neg(&Self::modulus());
         self
+    }
+
+    // This is used for arithmetic in unconstrained mode
+    pub(crate) fn cpu_inverse(self) -> Option<Fq> {
+        if self.is_zero() {
+            None
+        } else {
+            let mut inv = self;
+            inv.0.invert(&Fq::modulus());
+            Some(inv)
+        }
     }
 
     #[inline]
@@ -573,23 +573,13 @@ impl FieldElement for Fq {
         self.0.is_zero()
     }
 
-    fn inverse(self) -> Option<Fq> {
-        if self.is_zero() {
-            None
-        } else {
-            let mut inv = self;
-            inv.0.invert(&Fq::modulus());
-            Some(inv)
-        }
-    }
-
-    fn inverse_unconstrained(self) -> Option<Self> {
+    fn inverse(self) -> Option<Self> {
         #[cfg(target_os = "zkvm")]
         {
             // Compute the inverse using the zkvm syscall
             sp1_lib::unconstrained! {
                 let mut buf = [0u8; 33];
-                self.inverse().map(|inv| {
+                self.cpu_inverse().map(|inv| {
                     let bytes = cast::<[u128; 2], [u8; 32]>(inv.0.0);
                     buf[0..32].copy_from_slice(&bytes);
                     buf[32] = 1;
@@ -610,7 +600,7 @@ impl FieldElement for Fq {
         }
         #[cfg(not(target_os = "zkvm"))]
         {
-            self.inverse()
+            self.cpu_inverse()
         }
     }
 }

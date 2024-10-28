@@ -37,7 +37,7 @@ impl Fr {
         fields::Fr::from_str(s).map(Fr)
     }
     pub fn inverse(&self) -> Option<Self> {
-        self.0.inverse_unconstrained().map(Fr)
+        self.0.inverse().map(Fr)
     }
     pub fn is_zero(&self) -> bool {
         self.0.is_zero()
@@ -213,7 +213,7 @@ impl Fq {
         fields::Fq::from_str(s).map(Fq)
     }
     pub fn inverse(&self) -> Option<Self> {
-        self.0.inverse_unconstrained().map(Fq)
+        self.0.inverse().map(Fq)
     }
     pub fn is_zero(&self) -> bool {
         self.0.is_zero()
@@ -795,7 +795,7 @@ impl Gt {
         Gt(self.0.pow(exp.0))
     }
     pub fn inverse(&self) -> Option<Self> {
-        self.0.inverse_unconstrained().map(Gt)
+        self.0.inverse().map(Gt)
     }
     pub fn final_exponentiation(&self) -> Option<Self> {
         self.0.final_exponentiation().map(Gt)

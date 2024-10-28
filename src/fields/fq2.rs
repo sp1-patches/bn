@@ -7,13 +7,12 @@ use rand::Rng;
 
 use super::Sqrt;
 
-cfg_if::cfg_if! {
-    if #[cfg(target_os = "zkvm")] {
-        use sp1_lib::io::{hint_slice, read_vec};
-        use core::convert::TryInto;
-        use bytemuck::{cast, cast_ref, cast_mut};
-    }
-}
+#[cfg(target_os = "zkvm")]
+use {
+    bytemuck::{cast, cast_mut, cast_ref},
+    core::convert::TryInto,
+    sp1_lib::io::{hint_slice, read_vec},
+};
 
 #[inline]
 fn fq_non_residue() -> Fq {
@@ -256,24 +255,13 @@ impl FieldElement for Fq2 {
         // "High-Speed Software Implementation of the Optimal Ate Pairing
         // over Barreto–Naehrig Curves"; Algorithm 8
 
-        self.c0
-            .mul(self.c0)
-            .sub((self.c1.mul(self.c1)).mul(fq_non_residue()))
-            .inverse_unconstrained()
-            .map(|t| Fq2 {
-                c0: self.c0.mul(t),
-                c1: (self.c1.mul(t)).neg(),
-            })
-    }
-
-    fn inverse_unconstrained(self) -> Option<Self> {
         #[cfg(target_os = "zkvm")]
         {
             // Compute the inverse using the zkvm syscall
             sp1_lib::unconstrained! {
                 let mut buf = [0u8; 65];
-                self.inverse().map(|inv| {
-                    let bytes = cast::<[u128; 4], [u8; 64]>(inv.to_u512().0);
+                self.cpu_inverse().map(|inv| {
+                    let bytes = cast::<Fq2, [u8; 64]>(inv);
                     buf[0..64].copy_from_slice(&bytes);
                     buf[64] = 1;
                 });
@@ -291,7 +279,7 @@ impl FieldElement for Fq2 {
         }
         #[cfg(not(target_os = "zkvm"))]
         {
-            self.inverse()
+            self.cpu_inverse()
         }
     }
 }
@@ -417,6 +405,22 @@ impl Fq2 {
             }
         }
         res
+    }
+
+    fn cpu_inverse(self) -> Option<Self> {
+        // "High-Speed Software Implementation of the Optimal Ate Pairing
+        // over Barreto–Naehrig Curves"; Algorithm 8
+
+        let x = self
+            .c0
+            .cpu_mul(self.c0)
+            .cpu_sub((self.c1.cpu_mul(self.c1)).cpu_mul(fq_non_residue()))
+            .cpu_inverse()
+            .map(|t| Fq2 {
+                c0: self.c0.cpu_mul(t),
+                c1: (self.c1.cpu_mul(t)).cpu_neg(),
+            });
+        x
     }
 
     fn cpu_sqrt(&self) -> Option<Self> {
