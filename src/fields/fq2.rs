@@ -261,8 +261,8 @@ impl FieldElement for Fq2 {
             .sub((self.c1.mul(self.c1)).mul(fq_non_residue()))
             .inverse_unconstrained()
             .map(|t| Fq2 {
-                c0: self.c0.cpu_mul(t),
-                c1: (self.c1.cpu_mul(t)).cpu_neg(),
+                c0: self.c0.mul(t),
+                c1: (self.c1.mul(t)).neg(),
             })
     }
 
