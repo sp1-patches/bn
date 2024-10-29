@@ -1,18 +1,18 @@
 use crate::arith::{U256, U512};
 use crate::fields::{const_fq, FieldElement, Fq};
 use bytemuck::{AnyBitPattern, NoUninit};
+use core::cmp::Ordering;
 use core::ops::{Add, Div, Mul, Neg, Sub};
 use rand::Rng;
 
 use super::Sqrt;
 
-cfg_if::cfg_if! {
-    if #[cfg(target_os = "zkvm")] {
-        use sp1_lib::io::{hint_slice, read_vec};
-        use core::convert::TryInto;
-        use bytemuck::{cast, cast_ref, cast_mut};
-    }
-}
+#[cfg(target_os = "zkvm")]
+use {
+    bytemuck::{cast, cast_mut, cast_ref},
+    core::convert::TryInto,
+    sp1_lib::io::{hint_slice, read_vec},
+};
 
 #[inline]
 fn fq_non_residue() -> Fq {
@@ -34,7 +34,7 @@ pub const fn fq2_nonresidue() -> Fq2 {
     )
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, NoUninit, AnyBitPattern, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, NoUninit, AnyBitPattern)]
 #[repr(C)]
 pub struct Fq2 {
     c0: Fq,
@@ -255,25 +255,13 @@ impl FieldElement for Fq2 {
         // "High-Speed Software Implementation of the Optimal Ate Pairing
         // over Barreto–Naehrig Curves"; Algorithm 8
 
-        (self
-            .c0
-            .cpu_mul(self.c0)
-            .cpu_sub((self.c1.cpu_mul(self.c1)).cpu_mul(fq_non_residue())))
-        .inverse()
-        .map(|t| Fq2 {
-            c0: self.c0.cpu_mul(t),
-            c1: (self.c1.cpu_mul(t)).cpu_neg(),
-        })
-    }
-
-    fn inverse_unconstrained(self) -> Option<Self> {
         #[cfg(target_os = "zkvm")]
         {
             // Compute the inverse using the zkvm syscall
             sp1_lib::unconstrained! {
                 let mut buf = [0u8; 65];
-                self.inverse().map(|inv| {
-                    let bytes = cast::<[u128; 4], [u8; 64]>(inv.to_u512().0);
+                self.cpu_inverse().map(|inv| {
+                    let bytes = cast::<Fq2, [u8; 64]>(inv);
                     buf[0..64].copy_from_slice(&bytes);
                     buf[64] = 1;
                 });
@@ -291,7 +279,7 @@ impl FieldElement for Fq2 {
         }
         #[cfg(not(target_os = "zkvm"))]
         {
-            self.inverse()
+            self.cpu_inverse()
         }
     }
 }
@@ -366,6 +354,23 @@ impl Neg for Fq2 {
     }
 }
 
+/// `Fq2` elements are ordered lexicographically.
+impl Ord for Fq2 {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self.c1.cmp(&other.c1) {
+            Ordering::Greater => Ordering::Greater,
+            Ordering::Less => Ordering::Less,
+            Ordering::Equal => self.c0.cmp(&other.c0),
+        }
+    }
+}
+
+impl PartialOrd for Fq2 {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 lazy_static::lazy_static! {
     static ref FQ: U256 = U256::from([
         0x3c208c16d87cfd47,
@@ -400,6 +405,22 @@ impl Fq2 {
             }
         }
         res
+    }
+
+    fn cpu_inverse(self) -> Option<Self> {
+        // "High-Speed Software Implementation of the Optimal Ate Pairing
+        // over Barreto–Naehrig Curves"; Algorithm 8
+
+        let x = self
+            .c0
+            .cpu_mul(self.c0)
+            .cpu_sub((self.c1.cpu_mul(self.c1)).cpu_mul(fq_non_residue()))
+            .cpu_inverse()
+            .map(|t| Fq2 {
+                c0: self.c0.cpu_mul(t),
+                c1: (self.c1.cpu_mul(t)).cpu_neg(),
+            });
+        x
     }
 
     fn cpu_sqrt(&self) -> Option<Self> {

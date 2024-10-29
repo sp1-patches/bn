@@ -34,7 +34,6 @@ pub trait FieldElement:
         (*self) * (*self)
     }
     fn inverse(self) -> Option<Self>;
-    fn inverse_unconstrained(self) -> Option<Self>;
     fn pow<I: Into<U256>>(&self, by: I) -> Self {
         let mut res = Self::one();
 

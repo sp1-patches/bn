@@ -239,10 +239,6 @@ impl FieldElement for Fq6 {
             None => None,
         }
     }
-
-    fn inverse_unconstrained(self) -> Option<Self> {
-        self.inverse() // same as constrained
-    }
 }
 
 impl Mul for Fq6 {

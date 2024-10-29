@@ -122,7 +122,6 @@ impl Display for Error {
         }
     }
 }
-
 impl<P: GroupParams> AffineG<P> {
     pub fn new(x: P::Base, y: P::Base) -> Result<Self, Error> {
         let lhs = y.squared();
@@ -187,8 +186,8 @@ impl<P: GroupParams> AffineG<P> {
     /// This means that, if `P::BaseField: PrimeField`, the results are sorted as integers.
     pub fn get_ys_from_x_unchecked(x: P::Base) -> Option<(P::Base, P::Base)> {
         // Compute the curve equation x^3 + Ax + B.
-        let x3_plus_ax_plus_b = P::add_b(x.squared() * x);
-        let y = x3_plus_ax_plus_b.sqrt()?;
+        let x3_plus_b = P::add_b(x.squared() * x);
+        let y = x3_plus_b.sqrt()?;
         let neg_y = -y;
         match y < neg_y {
             true => Some((y, neg_y)),
@@ -256,6 +255,8 @@ impl AffineG1 {
 impl Add<AffineG1> for AffineG1 {
     type Output = AffineG1;
 
+    // We only need the mutability for the zkvm case.
+    #[allow(unused_mut)]
     fn add(mut self, other: AffineG1) -> AffineG1 {
         #[cfg(target_os = "zkvm")]
         {
@@ -347,7 +348,7 @@ impl<P: GroupParams> G<P> {
                 y: self.y,
             })
         } else {
-            let zinv = self.z.inverse_unconstrained().unwrap();
+            let zinv = self.z.inverse().unwrap();
             let zinv_squared = zinv.squared();
 
             Some(AffineG {

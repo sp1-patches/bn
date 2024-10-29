@@ -1,6 +1,6 @@
 [package]
 name = "substrate-bn"
-version = "0.7.0"
+version = "0.6.0"
 authors = [
     "Sean Bowe <ewillbefull@gmail.com>",
     "Parity Technologies <admin@parity.io>",
@@ -25,10 +25,12 @@ byteorder = { version = "1.0", features = ["i128"], default-features = false }
 crunchy = "0.2.1"
 lazy_static = { version = "1.4.0", features = ["spin_no_std"] }
 rustc-hex = { version = "2", default-features = false }
-sp1-lib = "1.2.0-rc1"
 cfg-if = "1.0.0"
 bytemuck = { version = "1.16.1", features = ["derive"] }
-num-bigint = "0.4.6"
+num-bigint = { version = "0.4.6", default-features = false }
+
+[target.'cfg(target_os = "zkvm")'.dependencies]
+sp1-lib = "3.0.0"
 
 [dev-dependencies]
 rand = { version = "0.8.3", features = ["std_rng"] }

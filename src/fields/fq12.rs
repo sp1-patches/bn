@@ -60,7 +60,7 @@ impl Fq12 {
     }
 
     fn final_exponentiation_first_chunk(&self) -> Option<Fq12> {
-        match self.inverse_unconstrained() {
+        match self.inverse() {
             Some(b) => {
                 let a = self.unitary_inverse();
                 let c = a * b;
@@ -378,10 +378,6 @@ impl FieldElement for Fq12 {
                 c0: self.c0 * t,
                 c1: -(self.c1 * t),
             })
-    }
-
-    fn inverse_unconstrained(self) -> Option<Self> {
-        self.inverse() // same as constrained
     }
 }
 
