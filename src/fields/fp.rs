@@ -2,8 +2,10 @@ use crate::arith::{U256, U512};
 use crate::fields::FieldElement;
 use alloc::vec::Vec;
 use bytemuck::{AnyBitPattern, NoUninit};
-use core::ops::{Add, Mul, Neg, Sub};
+use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use rand::Rng;
+
+use super::Sqrt;
 
 cfg_if::cfg_if! {
     if #[cfg(target_os = "zkvm")] {
@@ -15,7 +17,7 @@ cfg_if::cfg_if! {
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, NoUninit, AnyBitPattern)]
 #[repr(C)]
-pub struct Fr(U256);
+pub struct Fr(pub(crate) U256);
 
 impl From<Fr> for U256 {
     #[inline]
@@ -27,7 +29,7 @@ impl From<Fr> for U256 {
 impl Fr {
     #[inline]
     #[allow(dead_code)]
-    pub(crate) fn to_mont(&self) -> U256 {
+    pub(crate) fn to_mont(self) -> U256 {
         let mut res = self.0;
         res.mul(
             &U256::from([
@@ -130,12 +132,6 @@ impl Fr {
 
     #[inline]
     #[allow(dead_code)]
-    pub fn inv(&self) -> u128 {
-        unimplemented!("n' inverse is not used")
-    }
-
-    #[inline]
-    #[allow(dead_code)]
     pub fn raw(&self) -> &U256 {
         unimplemented!("raw representation is not in Montgomery form")
     }
@@ -150,6 +146,16 @@ impl Fr {
         self.0.mul(&other.0, &Self::modulus());
 
         self
+    }
+
+    // This is used for arithmetic in unconstrained mode
+    fn cpu_inverse(mut self) -> Option<Self> {
+        if self.is_zero() {
+            None
+        } else {
+            self.0.invert(&Self::modulus());
+            Some(self)
+        }
     }
 }
 
@@ -173,33 +179,34 @@ impl FieldElement for Fr {
         self.0.is_zero()
     }
 
-    fn inverse(mut self) -> Option<Self> {
-        if self.is_zero() {
-            None
-        } else {
-            self.0.invert(&Self::modulus());
-            Some(self)
-        }
-    }
-
-    fn inverse_unconstrained(self) -> Option<Self> {
+    fn inverse(self) -> Option<Self> {
         #[cfg(target_os = "zkvm")]
         {
+            // Compute the inverse using the zkvm syscall
             sp1_lib::unconstrained! {
                 let mut buf = [0u8; 33];
-                let bytes = cast::<Fr, [u8; 32]>(self.inverse().unwrap()) ;
-                buf.copy_from_slice(bytes.as_slice());
+                self.cpu_inverse().map(|inv| {
+                    let bytes = cast::<[u128; 2], [u8; 32]>(inv.0.0);
+                    buf[0..32].copy_from_slice(&bytes);
+                    buf[32] = 1;
+                });
                 hint_slice(&buf);
             }
-
-            let bytes: [u8; 32] = sp1_lib::io::read_vec().try_into().unwrap();
-            let inv = Fr(U256(cast::<[u8; 32], [u128; 2]>(bytes)));
-            Some(inv).filter(|inv| !self.is_zero() && self * *inv == Fr::one())
+            let byte_vec = sp1_lib::io::read_vec();
+            let bytes: [u8; 33] = byte_vec.try_into().unwrap();
+            match bytes[32] {
+                0 => None,
+                _ => {
+                    let inv = Fr(U256(cast::<[u8; 32], [u128; 2]>(
+                        bytes[0..32].try_into().unwrap(),
+                    )));
+                    Some(inv).filter(|inv| !self.is_zero() && self * *inv == Fr::one())
+                }
+            }
         }
-
         #[cfg(not(target_os = "zkvm"))]
         {
-            self.inverse()
+            self.cpu_inverse()
         }
     }
 }
@@ -208,10 +215,17 @@ impl Add for Fr {
     type Output = Fr;
 
     #[inline]
-    fn add(mut self, other: Fr) -> Fr {
-        self.0.add(&other.0, &Self::modulus());
+    fn add(self, other: Fr) -> Fr {
+        let mut result = self;
+        result.add_assign(other);
+        result
+    }
+}
 
-        self
+impl AddAssign for Fr {
+    #[inline]
+    fn add_assign(&mut self, other: Fr) {
+        self.0.add(&other.0, &Self::modulus());
     }
 }
 
@@ -219,10 +233,17 @@ impl Sub for Fr {
     type Output = Fr;
 
     #[inline]
-    fn sub(mut self, other: Fr) -> Fr {
-        self.0.sub(&other.0, &Self::modulus());
+    fn sub(self, other: Fr) -> Fr {
+        let mut result = self;
+        result.sub_assign(other);
+        result
+    }
+}
 
-        self
+impl SubAssign for Fr {
+    #[inline]
+    fn sub_assign(&mut self, other: Fr) {
+        self.0.sub(&other.0, &Self::modulus());
     }
 }
 
@@ -230,7 +251,17 @@ impl Mul for Fr {
     type Output = Fr;
 
     #[inline]
-    fn mul(mut self, other: Fr) -> Fr {
+    #[allow(unused_mut)]
+    fn mul(self, other: Fr) -> Fr {
+        let mut result = self;
+        result.mul_assign(other);
+        result
+    }
+}
+
+impl MulAssign for Fr {
+    #[inline]
+    fn mul_assign(&mut self, other: Fr) {
         #[cfg(target_os = "zkvm")]
         {
             let mut result: [u32; 8] = [0u32; 8];
@@ -245,12 +276,12 @@ impl Mul for Fr {
                     &rhs as *const [u32; 8],
                     &modulus as *const [u32; 8],
                 );
-                Self(U256::from(cast::<[u32; 8], [u64; 4]>(result)))
+                self.0 = U256::from(cast::<[u32; 8], [u64; 4]>(result));
             }
         }
         #[cfg(not(target_os = "zkvm"))]
         {
-            self.cpu_mul(other)
+            *self = self.cpu_mul(other);
         }
     }
 }
@@ -266,7 +297,28 @@ impl Neg for Fr {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug, NoUninit, AnyBitPattern)]
+impl Div for Fr {
+    type Output = Fr;
+
+    #[inline]
+    fn div(self, other: Fr) -> Fr {
+        self * other.inverse().expect("division by zero")
+    }
+}
+
+impl DivAssign for Fr {
+    fn div_assign(&mut self, rhs: Self) {
+        *self = *self / rhs;
+    }
+}
+
+impl From<u64> for Fr {
+    fn from(a: u64) -> Self {
+        Fr(U256::from([a, 0, 0, 0]))
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug, NoUninit, AnyBitPattern, Ord)]
 #[repr(C)]
 pub struct Fq(pub U256);
 
@@ -295,7 +347,7 @@ impl PartialOrd for Fq {
 impl Fq {
     #[inline]
     #[allow(dead_code)]
-    pub(crate) fn to_mont(&self) -> U256 {
+    pub(crate) fn to_mont(self) -> U256 {
         let mut res = self.0;
         res.mul(
             &U256::from([
@@ -402,12 +454,6 @@ impl Fq {
 
     #[inline]
     #[allow(dead_code)]
-    pub fn inv(&self) -> u128 {
-        unimplemented!("n' inverse is not used")
-    }
-
-    #[inline]
-    #[allow(dead_code)]
     pub fn raw(&self) -> &U256 {
         unimplemented!("raw representation is not in Montgomery form")
     }
@@ -433,7 +479,7 @@ impl Fq {
     // This is used for arithmetic in unconstrained mode
     #[inline]
     pub(crate) fn cpu_mul(mut self, other: Fq) -> Fq {
-        self.0.mul(&other.0, &Self::modulus());
+        self.0.cpu_mul(&other.0, &Self::modulus());
         self
     }
 
@@ -444,7 +490,19 @@ impl Fq {
         self
     }
 
+    // This is used for arithmetic in unconstrained mode
+    pub(crate) fn cpu_inverse(self) -> Option<Fq> {
+        if self.is_zero() {
+            None
+        } else {
+            let mut inv = self;
+            inv.0.invert(&Fq::modulus());
+            Some(inv)
+        }
+    }
+
     #[inline]
+    #[allow(dead_code)]
     pub(crate) fn add_inp(&mut self, other: &Fq) {
         #[cfg(target_os = "zkvm")]
         {
@@ -461,6 +519,7 @@ impl Fq {
     }
 
     #[inline]
+    #[allow(dead_code)]
     pub(crate) fn sub_inp(&mut self, other: &Fq) {
         #[cfg(target_os = "zkvm")]
         {
@@ -477,6 +536,7 @@ impl Fq {
     }
 
     #[inline]
+    #[allow(dead_code)]
     pub(crate) fn mul_inp(&mut self, other: &Fq) {
         #[cfg(target_os = "zkvm")]
         {
@@ -513,34 +573,34 @@ impl FieldElement for Fq {
         self.0.is_zero()
     }
 
-    fn inverse(self) -> Option<Fq> {
-        if self.is_zero() {
-            None
-        } else {
-            let mut inv = self;
-            inv.0.invert(&Fq::modulus());
-            Some(inv)
-        }
-    }
-
-    fn inverse_unconstrained(self) -> Option<Self> {
+    fn inverse(self) -> Option<Self> {
         #[cfg(target_os = "zkvm")]
         {
+            // Compute the inverse using the zkvm syscall
             sp1_lib::unconstrained! {
-                let mut buf = [0u8; 32];
-                let bytes = unsafe { cast::<[u128; 2], [u8; 32]>(self.inverse().unwrap().0.0) };
-                buf.copy_from_slice(bytes.as_slice());
+                let mut buf = [0u8; 33];
+                self.cpu_inverse().map(|inv| {
+                    let bytes = cast::<[u128; 2], [u8; 32]>(inv.0.0);
+                    buf[0..32].copy_from_slice(&bytes);
+                    buf[32] = 1;
+                });
                 hint_slice(&buf);
             }
-
-            let bytes: [u8; 32] = sp1_lib::io::read_vec().try_into().unwrap();
-            let inv = Fq(U256(cast::<[u8; 32], [u128; 2]>(bytes)));
-            Some(inv).filter(|inv| !self.is_zero() && self * *inv == Fq::one())
+            let byte_vec = sp1_lib::io::read_vec();
+            let bytes: [u8; 33] = byte_vec.try_into().unwrap();
+            match bytes[32] {
+                0 => None,
+                _ => {
+                    let inv = Fq(U256(cast::<[u8; 32], [u128; 2]>(
+                        bytes[0..32].try_into().unwrap(),
+                    )));
+                    Some(inv).filter(|inv| !self.is_zero() && self * *inv == Fq::one())
+                }
+            }
         }
-
         #[cfg(not(target_os = "zkvm"))]
         {
-            self.inverse()
+            self.cpu_inverse()
         }
     }
 }
@@ -549,6 +609,7 @@ impl Add for Fq {
     type Output = Fq;
 
     #[inline]
+    #[allow(unused_mut)]
     fn add(mut self, other: Fq) -> Fq {
         #[cfg(target_os = "zkvm")]
         {
@@ -566,6 +627,7 @@ impl Sub for Fq {
     type Output = Fq;
 
     #[inline]
+    #[allow(unused_mut)]
     fn sub(mut self, other: Fq) -> Fq {
         #[cfg(target_os = "zkvm")]
         {
@@ -597,10 +659,20 @@ impl Mul for Fq {
     }
 }
 
+impl Div for Fq {
+    type Output = Fq;
+
+    #[inline]
+    fn div(self, other: Fq) -> Fq {
+        self * other.inverse().expect("division by zero")
+    }
+}
+
 impl Neg for Fq {
     type Output = Fq;
 
     #[inline]
+    #[allow(unused_mut)]
     fn neg(mut self) -> Fq {
         #[cfg(target_os = "zkvm")]
         {
@@ -625,26 +697,39 @@ lazy_static::lazy_static! {
     ]);
 
     pub static ref FQ_MINUS3_DIV4: Fq =
-        Fq::new(3.into()).expect("3 is a valid field element and static; qed").neg() *
+        Fq::new(3.into()).expect("3 is a valid field element and static; qed").cpu_neg().cpu_mul(
         Fq::new(4.into()).expect("4 is a valid field element and static; qed").inverse()
-            .expect("4 has inverse in Fq and is static; qed");
+            .expect("4 has inverse in Fq and is static; qed"));
 
     static ref FQ_MINUS1_DIV2: Fq =
-        Fq::new(1.into()).expect("1 is a valid field element and static; qed").neg() *
+        Fq::new(1.into()).expect("1 is a valid field element and static; qed").cpu_neg().cpu_mul(
         Fq::new(2.into()).expect("2 is a valid field element and static; qed").inverse()
-            .expect("2 has inverse in Fq and is static; qed");
+            .expect("2 has inverse in Fq and is static; qed"));
 
 }
 
 impl Fq {
+    pub(crate) fn cpu_pow<I: Into<U256>>(&self, by: I) -> Self {
+        let mut res = Self::one();
+
+        for i in by.into().bits() {
+            res = res.cpu_mul(res);
+            if i {
+                res = res.cpu_mul(*self);
+            }
+        }
+
+        res
+    }
+
     pub fn sqrt(&self) -> Option<Self> {
         // This is used for arithmetic in unconstrained mode
         fn cpu_sqrt(f: &Fq) -> Option<Fq> {
-            let a1 = f.pow(*FQ_MINUS3_DIV4);
+            let a1 = f.cpu_pow(*FQ_MINUS3_DIV4);
             let a1a = a1.cpu_mul(*f);
             let a0 = a1.cpu_mul(a1a);
             let mut am1 = *FQ;
-            am1.sub(&1.into(), &*FQ);
+            am1.sub(&1.into(), &FQ);
             if a0 == Fq::new(am1).unwrap() {
                 None
             } else {
@@ -683,6 +768,12 @@ impl Fq {
         {
             cpu_sqrt(self)
         }
+    }
+}
+
+impl Sqrt for Fq {
+    fn sqrt(&self) -> Option<Self> {
+        self.sqrt()
     }
 }
 

@@ -1,6 +1,7 @@
 language: rust
 
 script:
+  - cargo clippy -- -D warnings
   - cargo test --release
   - cargo test --release --no-default-features
   - cargo check --no-default-features

@@ -1,5 +1,5 @@
 use crate::fields::{const_fq, FieldElement, Fq, Fq2};
-use core::ops::{Add, Mul, Neg, Sub};
+use core::ops::{Add, Div, Mul, Neg, Sub};
 use rand::Rng;
 
 fn frobenius_coeffs_c1(n: usize) -> Fq2 {
@@ -99,11 +99,7 @@ pub struct Fq6 {
 
 impl Fq6 {
     pub fn new(c0: Fq2, c1: Fq2, c2: Fq2) -> Self {
-        Fq6 {
-            c0: c0,
-            c1: c1,
-            c2: c2,
-        }
+        Fq6 { c0, c1, c2 }
     }
 
     pub fn mul_by_nonresidue(&self) -> Self {
@@ -243,10 +239,6 @@ impl FieldElement for Fq6 {
             None => None,
         }
     }
-
-    fn inverse_unconstrained(self) -> Option<Self> {
-        self.inverse() // same as constrained
-    }
 }
 
 impl Mul for Fq6 {
@@ -320,6 +312,14 @@ impl Add for Fq6 {
             c1: self.c1 + other.c1,
             c2: self.c2 + other.c2,
         }
+    }
+}
+
+impl Div for Fq6 {
+    type Output = Fq6;
+
+    fn div(self, other: Fq6) -> Fq6 {
+        self * other.inverse().expect("division by zero")
     }
 }
 

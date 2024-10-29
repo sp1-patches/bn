@@ -1,15 +1,20 @@
 use crate::arith::U256;
-use crate::fields::{const_fq, fq2_nonresidue, FieldElement, Fq, Fq12, Fq2, Fr};
-#[cfg(test)]
+use crate::fields::{const_fq, fq2_nonresidue, FieldElement, Fq, Fq12, Fq2, Fr, Sqrt};
+#[allow(unused_imports)]
 use alloc::vec;
 use alloc::vec::Vec;
+use core::fmt::Display;
+#[cfg(target_os = "zkvm")]
+use core::mem::transmute;
+use core::ops::AddAssign;
 use core::{
     fmt,
     ops::{Add, Mul, Neg, Sub},
 };
-use rand::Rng;
-use sp1_lib::syscall_bn254_add;
 
+use rand::Rng;
+#[cfg(target_os = "zkvm")]
+use sp1_lib::{syscall_bn254_add, syscall_bn254_double};
 // This is the NAF version of ate_loop_count. Entries are all mod 4, so 3 = -1
 // n.b. ate_loop_count = 0x19d797039be763ba8
 //                     = 11001110101111001011100000011100110111110011101100011101110101000
@@ -40,13 +45,21 @@ pub trait GroupElement:
 }
 
 pub trait GroupParams: Sized + fmt::Debug {
-    type Base: FieldElement;
+    type Base: FieldElement + Ord + Sqrt;
 
     fn name() -> &'static str;
     fn one() -> G<Self>;
     fn coeff_b() -> Self::Base;
     fn check_order() -> bool {
         false
+    }
+    #[inline(always)]
+    fn add_b(elem: Self::Base) -> Self::Base {
+        if Self::coeff_b().is_zero() {
+            elem
+        } else {
+            elem + Self::coeff_b()
+        }
     }
 }
 
@@ -59,7 +72,7 @@ pub struct G<P: GroupParams> {
 
 impl<P: GroupParams> G<P> {
     pub fn new(x: P::Base, y: P::Base, z: P::Base) -> Self {
-        G { x: x, y: y, z: z }
+        G { x, y, z }
     }
 
     pub fn x(&self) -> &P::Base {
@@ -87,7 +100,7 @@ impl<P: GroupParams> G<P> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct AffineG<P: GroupParams> {
     x: P::Base,
     y: P::Base,
@@ -97,15 +110,27 @@ pub struct AffineG<P: GroupParams> {
 pub enum Error {
     NotOnCurve,
     NotInSubgroup,
+    InvalidInputLength,
 }
 
+impl Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::NotOnCurve => write!(f, "Point is not on curve"),
+            Error::NotInSubgroup => write!(f, "Point is not in subgroup"),
+            Error::InvalidInputLength => write!(f, "Invalid input length"),
+        }
+    }
+}
 impl<P: GroupParams> AffineG<P> {
     pub fn new(x: P::Base, y: P::Base) -> Result<Self, Error> {
-        if y.squared() == (x.squared() * x) + P::coeff_b() {
+        let lhs = y.squared();
+        let rhs = (x.squared() * x) + P::coeff_b();
+        if lhs == rhs {
             if P::check_order() {
                 let p: G<P> = G {
-                    x: x,
-                    y: y,
+                    x,
+                    y,
                     z: P::Base::one(),
                 };
 
@@ -114,9 +139,20 @@ impl<P: GroupParams> AffineG<P> {
                 }
             }
 
-            Ok(AffineG { x: x, y: y })
+            Ok(AffineG { x, y })
         } else {
             Err(Error::NotOnCurve)
+        }
+    }
+
+    pub fn new_unchecked(x: P::Base, y: P::Base) -> Self {
+        AffineG { x, y }
+    }
+
+    pub fn zero() -> Self {
+        AffineG {
+            x: P::Base::zero(),
+            y: P::Base::one(),
         }
     }
 
@@ -134,6 +170,37 @@ impl<P: GroupParams> AffineG<P> {
 
     pub fn y_mut(&mut self) -> &mut P::Base {
         &mut self.y
+    }
+
+    pub fn one() -> Self {
+        let p: G<P> = G::one();
+        AffineG::new(p.x / p.z, p.y / p.z).unwrap()
+    }
+
+    /// Returns the two possible y-coordinates corresponding to the given x-coordinate.
+    /// The corresponding points are not guaranteed to be in the prime-order subgroup,
+    /// but are guaranteed to be on the curve. That is, this method returns `None`
+    /// if the x-coordinate corresponds to a non-curve point.
+    ///
+    /// The results are sorted by lexicographical order.
+    /// This means that, if `P::BaseField: PrimeField`, the results are sorted as integers.
+    pub fn get_ys_from_x_unchecked(x: P::Base) -> Option<(P::Base, P::Base)> {
+        // Compute the curve equation x^3 + Ax + B.
+        let x3_plus_b = P::add_b(x.squared() * x);
+        let y = x3_plus_b.sqrt()?;
+        let neg_y = -y;
+        match y < neg_y {
+            true => Some((y, neg_y)),
+            false => Some((neg_y, y)),
+        }
+    }
+
+    pub fn to_jacobian(self) -> G<P> {
+        G {
+            x: self.x,
+            y: self.y,
+            z: P::Base::one(),
+        }
     }
 }
 
@@ -153,11 +220,7 @@ impl<P: GroupParams> fmt::Debug for G<P> {
 
 impl<P: GroupParams> Clone for G<P> {
     fn clone(&self) -> Self {
-        G {
-            x: self.x,
-            y: self.y,
-            z: self.z,
-        }
+        *self
     }
 }
 
@@ -165,14 +228,86 @@ impl<P: GroupParams> Copy for G<P> {}
 
 impl<P: GroupParams> Clone for AffineG<P> {
     fn clone(&self) -> Self {
-        AffineG {
-            x: self.x,
-            y: self.y,
-        }
+        *self
     }
 }
 
 impl<P: GroupParams> Copy for AffineG<P> {}
+
+impl AffineG1 {
+    pub fn double(&mut self) -> Self {
+        #[cfg(target_os = "zkvm")]
+        {
+            let mut out = *self;
+            unsafe { syscall_bn254_double(transmute(&mut out)) };
+            out
+        }
+        #[cfg(not(target_os = "zkvm"))]
+        {
+            let p: G1 = (*self).to_jacobian();
+            (p + p)
+                .to_affine()
+                .expect("Unable to convert G1 to AffineG1")
+        }
+    }
+}
+
+impl Add<AffineG1> for AffineG1 {
+    type Output = AffineG1;
+
+    // We only need the mutability for the zkvm case.
+    #[allow(unused_mut)]
+    fn add(mut self, other: AffineG1) -> AffineG1 {
+        #[cfg(target_os = "zkvm")]
+        {
+            let mut out = self;
+            if self == other {
+                return self.double();
+            }
+            unsafe { syscall_bn254_add(transmute(&mut out), transmute(&other)) };
+            out
+        }
+        #[cfg(not(target_os = "zkvm"))]
+        {
+            let p: G1 = self.to_jacobian();
+            let q: G1 = other.to_jacobian();
+            (p + q)
+                .to_affine()
+                .expect("Unable to convert G1 to AffineG1")
+        }
+    }
+}
+
+impl Sub<AffineG1> for AffineG1 {
+    type Output = AffineG1;
+
+    fn sub(self, other: AffineG1) -> AffineG1 {
+        self + (-other)
+    }
+}
+
+impl Mul<Fr> for AffineG1 {
+    type Output = AffineG1;
+
+    fn mul(self, other: Fr) -> AffineG1 {
+        let mut res: Option<AffineG1> = None;
+        let mut found_one = false;
+
+        for i in U256::from(other).bits() {
+            if found_one {
+                res = res.map(|mut p| p.double());
+            }
+
+            #[allow(clippy::suspicious_arithmetic_impl)]
+            if i {
+                found_one = true;
+                res = res.map(|p| p + self).or(Some(self));
+            }
+        }
+
+        res.unwrap()
+    }
+}
 
 impl<P: GroupParams> PartialEq for G<P> {
     fn eq(&self, other: &Self) -> bool {
@@ -198,7 +333,7 @@ impl<P: GroupParams> PartialEq for G<P> {
             return false;
         }
 
-        return true;
+        true
     }
 }
 impl<P: GroupParams> Eq for G<P> {}
@@ -218,18 +353,8 @@ impl<P: GroupParams> G<P> {
 
             Some(AffineG {
                 x: self.x * zinv_squared,
-                y: self.y * (zinv_squared * zinv),
+                y: self.y * (zinv * zinv_squared),
             })
-        }
-    }
-}
-
-impl<P: GroupParams> AffineG<P> {
-    pub fn to_jacobian(&self) -> G<P> {
-        G {
-            x: self.x,
-            y: self.y,
-            z: P::Base::one(),
         }
     }
 }
@@ -289,6 +414,7 @@ impl<P: GroupParams> Mul<Fr> for G<P> {
                 res = res.double();
             }
 
+            #[allow(clippy::suspicious_arithmetic_impl)]
             if i {
                 found_one = true;
                 res = res + self;
@@ -338,6 +464,17 @@ impl<P: GroupParams> Add<G<P>> for G<P> {
                 z: ((self.z + other.z).squared() - z1_squared - z2_squared) * h,
             }
         }
+    }
+}
+impl<P: GroupParams> AddAssign for G<P> {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs;
+    }
+}
+
+impl<P: GroupParams> AddAssign<&G<P>> for G<P> {
+    fn add_assign(&mut self, rhs: &G<P>) {
+        *self += *rhs;
     }
 }
 
@@ -561,14 +698,14 @@ fn twist_mul_by_q_y() -> Fq2 {
     )
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Debug)]
 pub struct EllCoeffs {
     pub ell_0: Fq2,
     pub ell_vw: Fq2,
     pub ell_vv: Fq2,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Debug)]
 pub struct G2Precomp {
     pub q: AffineG<G2Params>,
     pub coeffs: Vec<EllCoeffs>,
@@ -769,10 +906,30 @@ impl AffineG<G2Params> {
         coeffs.push(r.mixed_addition_step_for_flipped_miller_loop(&q1));
         coeffs.push(r.mixed_addition_step_for_flipped_miller_loop(&q2));
 
-        G2Precomp {
-            q: *self,
-            coeffs: coeffs,
-        }
+        G2Precomp { q: *self, coeffs }
+    }
+}
+
+impl G1 {
+    pub fn msm_variable_base(points: &[G1], scalars: &[Fr]) -> G1 {
+        points
+            .iter()
+            .zip(scalars)
+            .map(|(&p, &s)| p * s)
+            .fold(G1::zero(), |acc, p| acc + p)
+    }
+}
+
+impl AffineG1 {
+    pub fn msm_variable_base(points: &[AffineG1], scalars: &[Fr]) -> AffineG1 {
+        points
+            .iter()
+            .zip(scalars)
+            .map(|(&p, &s)| p * s)
+            .fold(None, |acc: Option<AffineG1>, p| {
+                acc.map(|acc| acc + p).or(Some(p))
+            })
+            .unwrap()
     }
 }
 
@@ -4190,7 +4347,7 @@ pub fn pairing(p: &G1, q: &G2) -> Fq12 {
 pub fn pairing_batch(ps: &[G1], qs: &[G2]) -> Fq12 {
     let mut p_affines: Vec<AffineG<G1Params>> = Vec::new();
     let mut q_precomputes: Vec<G2Precomp> = Vec::new();
-    for (p, q) in ps.into_iter().zip(qs.into_iter()) {
+    for (p, q) in ps.iter().zip(qs.iter()) {
         let p_affine = p.to_affine();
         let q_affine = q.to_affine();
         let exists = match (p_affine, q_affine) {
@@ -4203,7 +4360,7 @@ pub fn pairing_batch(ps: &[G1], qs: &[G2]) -> Fq12 {
             q_precomputes.push(q.to_affine().unwrap().precompute());
         }
     }
-    if q_precomputes.len() == 0 {
+    if q_precomputes.is_empty() {
         return Fq12::one();
     }
     miller_loop_batch(&q_precomputes, &p_affines)
@@ -4462,4 +4619,41 @@ fn test_y_at_point_at_infinity() {
 
     assert!(G2::zero().y == Fq2::one());
     assert!((-G2::zero()).y == Fq2::one());
+}
+
+#[test]
+fn test_to_from_affine() {
+    use rand::thread_rng;
+    let mut rng = thread_rng();
+    for _ in 0..10 {
+        {
+            let p = G1::random(&mut rng);
+            let affine = p.to_affine().unwrap();
+            let p2: G1 = affine.to_jacobian();
+            assert_eq!(p, p2, "Conversion to affine and back is not working");
+        }
+        {
+            let a = G1::random(&mut rng);
+            let b = G1::random(&mut rng);
+
+            let lhs = (a + b).to_affine().unwrap();
+            let rhs = a.to_affine().unwrap() + b.to_affine().unwrap();
+            assert_eq!(lhs, rhs, "Addition is not working");
+
+            let double_affine = a.to_affine().unwrap().double();
+            let double_affine_manual = (a + a).to_affine().unwrap();
+            assert_eq!(
+                double_affine, double_affine_manual,
+                "Doubling is not working"
+            );
+
+            let scalar = Fr::random(&mut rng);
+            let product_affine = (a * scalar).to_affine().unwrap();
+            let product_affine_manual = a.to_affine().unwrap() * scalar;
+            assert_eq!(
+                product_affine, product_affine_manual,
+                "Multiplication is not working"
+            );
+        }
+    }
 }

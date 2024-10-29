@@ -152,14 +152,14 @@ impl Ord for U512 {
     #[inline]
     fn cmp(&self, other: &U512) -> Ordering {
         for (a, b) in self.0.iter().zip(other.0.iter()).rev() {
-            if *a < *b {
-                return Ordering::Less;
-            } else if *a > *b {
-                return Ordering::Greater;
+            match a.cmp(b) {
+                Ordering::Less => return Ordering::Less,
+                Ordering::Greater => return Ordering::Greater,
+                _ => {}
             }
         }
 
-        return Ordering::Equal;
+        Ordering::Equal
     }
 }
 
@@ -174,14 +174,13 @@ impl Ord for U256 {
     #[inline]
     fn cmp(&self, other: &U256) -> Ordering {
         for (a, b) in self.0.iter().zip(other.0.iter()).rev() {
-            if *a < *b {
-                return Ordering::Less;
-            } else if *a > *b {
-                return Ordering::Greater;
+            match a.cmp(b) {
+                Ordering::Less => return Ordering::Less,
+                Ordering::Greater => return Ordering::Greater,
+                _ => {}
             }
         }
-
-        return Ordering::Equal;
+        Ordering::Equal
     }
 }
 
@@ -201,34 +200,51 @@ pub enum Error {
 impl U256 {
     /// Initialize U256 from slice of bytes (big endian)
     pub fn from_slice(s: &[u8]) -> Result<U256, Error> {
-        if s.len() != 32 {
+        let mut padded = [0u8; 32];
+
+        if s.len() > 32 {
             return Err(Error::InvalidLength {
                 expected: 32,
                 actual: s.len(),
             });
         }
 
+        // Copy the input slice to the end of the padded array
+        padded[32 - s.len()..].copy_from_slice(s);
+
         let mut n = [0; 2];
         for (l, i) in (0..2).rev().zip((0..2).map(|i| i * 16)) {
-            n[l] = BigEndian::read_u128(&s[i..]);
+            n[l] = BigEndian::read_u128(&padded[i..]);
         }
-
         Ok(U256(n))
     }
 
     pub fn to_big_endian(&self, s: &mut [u8]) -> Result<(), Error> {
-        if s.len() != 32 {
+        if s.len() > 32 {
             return Err(Error::InvalidLength {
                 expected: 32,
                 actual: s.len(),
             });
         }
 
+        let mut padded = [0u8; 32];
+        let start = 32 - s.len();
+        padded[start..].copy_from_slice(s);
+
         for (l, i) in (0..2).rev().zip((0..2).map(|i| i * 16)) {
-            BigEndian::write_u128(&mut s[i..], self.0[l]);
+            BigEndian::write_u128(&mut padded[i..], self.0[l]);
         }
 
+        s.copy_from_slice(&padded[..s.len()]);
+
         Ok(())
+    }
+
+    pub fn to_bytes_be(&self) -> [u8; 32] {
+        let mut s = [0u8; 32];
+        self.to_big_endian(&mut s)
+            .expect("Unable to serialize U256 to bytes");
+        s
     }
 
     #[inline]
@@ -296,6 +312,19 @@ impl U256 {
         sub_noborrow(&mut self.0, &other.0);
     }
 
+    pub(crate) fn cpu_mul(&mut self, other: &U256, modulo: &U256) {
+        let mut res = [0u128; 4];
+
+        unroll! {
+            for i in 0..2 {
+                mac_digit(i, &mut res, &other.0, self.0[i]);
+            }
+        }
+
+        let (_, r) = U512(res).divrem(modulo);
+        *self = r;
+    }
+
     /// Multiply `self` by `other` (mod `modulo`)
     pub fn mul(&mut self, other: &U256, modulo: &U256) {
         #[cfg(target_os = "zkvm")]
@@ -312,16 +341,7 @@ impl U256 {
         }
         #[cfg(not(target_os = "zkvm"))]
         {
-            let mut res = [0u128; 4];
-
-            unroll! {
-                for i in 0..2 {
-                    mac_digit(i, &mut res, &other.0, self.0[i]);
-                }
-            }
-
-            let (_, r) = U512(res).divrem(modulo);
-            *self = r;
+            self.cpu_mul(other, modulo);
         }
     }
 
@@ -392,7 +412,7 @@ impl U256 {
     /// Return an Iterator<Item=bool> over all bits from
     /// MSB to LSB.
     pub fn bits(&self) -> BitIterator {
-        BitIterator { int: &self, n: 256 }
+        BitIterator { int: self, n: 256 }
     }
 
     pub const fn from_raw_unchecked(v: [u128; 2]) -> Self {
@@ -462,7 +482,7 @@ fn adc(a: u128, b: u128, carry: &mut u128) -> u128 {
 fn add_nocarry(a: &mut [u128; 2], b: &[u128; 2]) {
     let mut carry = 0;
 
-    for (a, b) in a.into_iter().zip(b.iter()) {
+    for (a, b) in a.iter_mut().zip(b.iter()) {
         *a = adc(*a, *b, &mut carry);
     }
 
@@ -485,7 +505,7 @@ fn sub_noborrow(a: &mut [u128; 2], b: &[u128; 2]) {
 
     let mut borrow = 0;
 
-    for (a, b) in a.into_iter().zip(b.iter()) {
+    for (a, b) in a.iter_mut().zip(b.iter()) {
         *a = sbb(*a, *b, &mut borrow);
     }
 
@@ -831,4 +851,12 @@ fn testing_mul2() {
     ]);
     r_inv.mul(&one, &modulo);
     assert_eq!(r_inv, U256::from([1, 0, 0, 0]));
+}
+
+#[test]
+fn test_from_slice() {
+    let lhs = U256::one();
+    let rhs = U256::from_slice(&[1]).unwrap();
+
+    assert_eq!(lhs, rhs);
 }

@@ -1,16 +1,18 @@
 use crate::arith::{U256, U512};
 use crate::fields::{const_fq, FieldElement, Fq};
 use bytemuck::{AnyBitPattern, NoUninit};
-use core::ops::{Add, Mul, Neg, Sub};
+use core::cmp::Ordering;
+use core::ops::{Add, Div, Mul, Neg, Sub};
 use rand::Rng;
 
-cfg_if::cfg_if! {
-    if #[cfg(target_os = "zkvm")] {
-        use sp1_lib::io::{hint_slice, read_vec};
-        use core::convert::TryInto;
-        use bytemuck::{cast, cast_ref, cast_mut};
-    }
-}
+use super::Sqrt;
+
+#[cfg(target_os = "zkvm")]
+use {
+    bytemuck::{cast, cast_mut, cast_ref},
+    core::convert::TryInto,
+    sp1_lib::io::{hint_slice, read_vec},
+};
 
 #[inline]
 fn fq_non_residue() -> Fq {
@@ -253,28 +255,13 @@ impl FieldElement for Fq2 {
         // "High-Speed Software Implementation of the Optimal Ate Pairing
         // over Barreto–Naehrig Curves"; Algorithm 8
 
-        match (self
-            .c0
-            .cpu_mul(self.c0)
-            .cpu_sub((self.c1.cpu_mul(self.c1)).cpu_mul(fq_non_residue())))
-        .inverse()
-        {
-            Some(t) => Some(Fq2 {
-                c0: self.c0.cpu_mul(t),
-                c1: (self.c1.cpu_mul(t)).cpu_neg(),
-            }),
-            None => None,
-        }
-    }
-
-    fn inverse_unconstrained(self) -> Option<Self> {
         #[cfg(target_os = "zkvm")]
         {
             // Compute the inverse using the zkvm syscall
             sp1_lib::unconstrained! {
                 let mut buf = [0u8; 65];
-                self.inverse().map(|inv| {
-                    let bytes = cast::<[u128; 4], [u8; 64]>(inv.to_u512().0);
+                self.cpu_inverse().map(|inv| {
+                    let bytes = cast::<Fq2, [u8; 64]>(inv);
                     buf[0..64].copy_from_slice(&bytes);
                     buf[64] = 1;
                 });
@@ -292,7 +279,7 @@ impl FieldElement for Fq2 {
         }
         #[cfg(not(target_os = "zkvm"))]
         {
-            self.inverse()
+            self.cpu_inverse()
         }
     }
 }
@@ -300,6 +287,7 @@ impl FieldElement for Fq2 {
 impl Mul for Fq2 {
     type Output = Fq2;
 
+    #[allow(unused_mut)]
     fn mul(mut self, other: Fq2) -> Fq2 {
         #[cfg(target_os = "zkvm")]
         {
@@ -320,6 +308,16 @@ impl Mul for Fq2 {
                 c1: (self.c0 + self.c1) * (other.c0 + other.c1) - aa - bb,
             }
         }
+    }
+}
+
+impl Div for Fq2 {
+    type Output = Fq2;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        self * rhs
+            .inverse()
+            .expect("Failed to compute the inverse of the divisor")
     }
 }
 
@@ -356,6 +354,23 @@ impl Neg for Fq2 {
     }
 }
 
+/// `Fq2` elements are ordered lexicographically.
+impl Ord for Fq2 {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self.c1.cmp(&other.c1) {
+            Ordering::Greater => Ordering::Greater,
+            Ordering::Less => Ordering::Less,
+            Ordering::Equal => self.c0.cmp(&other.c0),
+        }
+    }
+}
+
+impl PartialOrd for Fq2 {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 lazy_static::lazy_static! {
     static ref FQ: U256 = U256::from([
         0x3c208c16d87cfd47,
@@ -365,14 +380,14 @@ lazy_static::lazy_static! {
     ]);
 
     static ref FQ_MINUS3_DIV4: Fq =
-        Fq::new(3.into()).expect("3 is a valid field element and static; qed").neg() *
+        Fq::new(3.into()).expect("3 is a valid field element and static; qed").cpu_neg().cpu_mul(
         Fq::new(4.into()).expect("4 is a valid field element and static; qed").inverse()
-        .expect("4 has inverse in Fq and is static; qed");
+        .expect("4 has inverse in Fq and is static; qed"));
 
     static ref FQ_MINUS1_DIV2: Fq =
-        Fq::new(1.into()).expect("1 is a valid field element and static; qed").neg() *
+        Fq::new(1.into()).expect("1 is a valid field element and static; qed").cpu_neg().cpu_mul(
         Fq::new(2.into()).expect("2 is a valid field element and static; qed").inverse()
-            .expect("2 has inverse in Fq and is static; qed");
+            .expect("2 has inverse in Fq and is static; qed"));
 }
 
 impl Fq2 {
@@ -380,11 +395,39 @@ impl Fq2 {
         Fq2::new(Fq::zero(), Fq::one())
     }
 
+    fn cpu_pow(&self, by: U256) -> Self {
+        let mut res = Self::one();
+
+        for i in by.bits() {
+            res = res.cpu_mul(res);
+            if i {
+                res = res.cpu_mul(*self);
+            }
+        }
+        res
+    }
+
+    fn cpu_inverse(self) -> Option<Self> {
+        // "High-Speed Software Implementation of the Optimal Ate Pairing
+        // over Barreto–Naehrig Curves"; Algorithm 8
+
+        let x = self
+            .c0
+            .cpu_mul(self.c0)
+            .cpu_sub((self.c1.cpu_mul(self.c1)).cpu_mul(fq_non_residue()))
+            .cpu_inverse()
+            .map(|t| Fq2 {
+                c0: self.c0.cpu_mul(t),
+                c1: (self.c1.cpu_mul(t)).cpu_neg(),
+            });
+        x
+    }
+
     fn cpu_sqrt(&self) -> Option<Self> {
-        let a1 = self.pow::<U256>((*FQ_MINUS3_DIV4).into());
+        let a1 = self.cpu_pow((*FQ_MINUS3_DIV4).into());
         let a1a = a1.cpu_mul(*self);
         let alpha = a1.cpu_mul(a1a);
-        let a0 = alpha.pow(*FQ).cpu_mul(alpha);
+        let a0 = alpha.cpu_pow(*FQ).cpu_mul(alpha);
 
         if a0 == Fq2::one().cpu_neg() {
             return None;
@@ -393,7 +436,7 @@ impl Fq2 {
         if alpha == Fq2::one().cpu_neg() {
             Some(Self::i().cpu_mul(a1a))
         } else {
-            let b = (alpha.cpu_add(Fq2::one())).pow::<U256>((*FQ_MINUS1_DIV2).into());
+            let b = (alpha.cpu_add(Fq2::one())).cpu_pow((*FQ_MINUS1_DIV2).into());
             Some(b.cpu_mul(a1a))
         }
     }
@@ -405,7 +448,7 @@ impl Fq2 {
             sp1_lib::unconstrained! {
                 let mut buf = [0u8; 65];
                 self.cpu_sqrt().map(|sqrt| {
-                    let bytes = cast::<[u128; 4], [u8; 64]>(sqrt.to_u512().0);
+                    let bytes = cast::<Fq2, [u8; 64]>(sqrt);
                     buf[0..64].copy_from_slice(&bytes);
                     buf[64] = 1;
                 });
@@ -427,11 +470,17 @@ impl Fq2 {
         }
     }
 
-    pub fn to_u512(&self) -> U512 {
+    pub fn to_u512(self) -> U512 {
         let c0: U256 = (*self.real()).into();
         let c1: U256 = (*self.imaginary()).into();
 
         U512::new(&c1, &c0, &FQ)
+    }
+}
+
+impl Sqrt for Fq2 {
+    fn sqrt(&self) -> Option<Self> {
+        self.sqrt()
     }
 }
 
