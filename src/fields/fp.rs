@@ -698,16 +698,16 @@ lazy_static::lazy_static! {
 
     pub static ref FQ_MINUS3_DIV4: Fq =
         Fq::new(3.into()).expect("3 is a valid field element and static; qed").cpu_neg().cpu_mul(
-        Fq::new(4.into()).expect("4 is a valid field element and static; qed").inverse()
+        Fq::new(4.into()).expect("4 is a valid field element and static; qed").cpu_inverse()
             .expect("4 has inverse in Fq and is static; qed"));
 
     static ref FQ_MINUS1_DIV2: Fq =
         Fq::new(1.into()).expect("1 is a valid field element and static; qed").cpu_neg().cpu_mul(
-        Fq::new(2.into()).expect("2 is a valid field element and static; qed").inverse()
+        Fq::new(2.into()).expect("2 is a valid field element and static; qed").cpu_inverse()
             .expect("2 has inverse in Fq and is static; qed"));
 
 }
-
+extern crate std;
 impl Fq {
     pub(crate) fn cpu_pow<I: Into<U256>>(&self, by: I) -> Self {
         let mut res = Self::one();
