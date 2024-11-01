@@ -707,7 +707,7 @@ lazy_static::lazy_static! {
             .expect("2 has inverse in Fq and is static; qed"));
 
 }
-extern crate std;
+
 impl Fq {
     pub(crate) fn cpu_pow<I: Into<U256>>(&self, by: I) -> Self {
         let mut res = Self::one();
