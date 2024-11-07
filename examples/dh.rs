@@ -1,7 +1,7 @@
 // This is an example of three-party Diffie-Hellman key exchange
 // Requires two rounds
 
-use substrate_bn::*;
+use substrate_bn_succinct::*;
 
 fn main() {
     let rng = &mut rand::thread_rng();
