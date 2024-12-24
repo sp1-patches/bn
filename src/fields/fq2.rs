@@ -254,33 +254,34 @@ impl FieldElement for Fq2 {
     fn inverse(self) -> Option<Self> {
         // "High-Speed Software Implementation of the Optimal Ate Pairing
         // over Barreto–Naehrig Curves"; Algorithm 8
+        
+        if self.is_zero() {
+            return None;
+        }
 
         #[cfg(target_os = "zkvm")]
-        {
-            // Compute the inverse using the zkvm syscall
+        {   
             sp1_lib::unconstrained! {
-                let mut buf = [0u8; 65];
-                self.cpu_inverse().map(|inv| {
+                // The elements was previously checked to be non-zero
+                if let Some(inv) = self.cpu_inverse() {
                     let bytes = cast::<Fq2, [u8; 64]>(inv);
-                    buf[0..64].copy_from_slice(&bytes);
-                    buf[64] = 1;
-                });
-                hint_slice(&buf);
-            }
-            let byte_vec = read_vec();
-            let bytes: [u8; 65] = byte_vec.try_into().unwrap();
-            match bytes[64] {
-                0 => None,
-                _ => {
-                    let inv = cast::<[u8; 64], Fq2>(bytes[0..64].try_into().unwrap());
-                    Some(inv).filter(|inv| !self.is_zero() && self * *inv == Fq2::one())
+
+                    hint_slice(&bytes);
+                } else {
+                    unreachable()
                 }
             }
+            let byte_vec = read_vec();
+            let bytes: [u8; 64] = byte_vec.try_into().unwrap();
+            let inv = cast::<[u8; 64], Fq2>(bytes);
+                
+            assert!(inv * self == Fq2::one(), "Invalid hint for inverse");
+
+            Some(inv)
         }
+       
         #[cfg(not(target_os = "zkvm"))]
-        {
-            self.cpu_inverse()
-        }
+        self.cpu_inverse() 
     }
 }
 
@@ -444,30 +445,54 @@ impl Fq2 {
     pub fn sqrt(&self) -> Option<Self> {
         #[cfg(target_os = "zkvm")]
         {
-            // Compute the square root using the zkvm syscall
+            if self.is_zero() {
+                return Some(Self::zero());
+            }
+
+            let nqr = Fq2::new(Fq::new(2_u64.into()).unwrap(), Fq::one());
+
             sp1_lib::unconstrained! {
                 let mut buf = [0u8; 65];
-                self.cpu_sqrt().map(|sqrt| {
-                    let bytes = cast::<Fq2, [u8; 64]>(sqrt);
+                
+                if let Some(root) = self.cpu_sqrt() {
+                    let bytes = cast::<Fq2, [u8; 64]>(root);
                     buf[0..64].copy_from_slice(&bytes);
                     buf[64] = 1;
-                });
+                } else {
+                    // hint to the vm the root of the square of the product of self and the known nqr.
+                    let has_root = *self * nqr;
+                    let root = has_root.cpu_sqrt().unwrap();
+
+                    let bytes = cast::<Fq2, [u8; 64]>(root);
+                    buf[0..64].copy_from_slice(&bytes);
+                    buf[64] = 0;
+                }
+
                 hint_slice(&buf);
             }
             let byte_vec = read_vec();
             let bytes: [u8; 65] = byte_vec.try_into().unwrap();
+
             match bytes[64] {
-                0 => None,
+                0 => {
+                    let root = cast::<[u8; 64], Fq2>(bytes[0..64].try_into().unwrap());
+                    
+                    assert!(root * root == *self * nqr, "Invalid hint for sqrt");
+
+                    None
+                },
                 _ => {
                     let sqrt = cast::<[u8; 64], Fq2>(bytes[0..64].try_into().unwrap());
-                    Some(sqrt).filter(|sqrt| *sqrt * *sqrt == *self)
+                    
+                    assert!(sqrt * sqrt == *self, "Invalid hint for sqrt");
+
+                    Some(sqrt)
                 }
             }
         }
+        
         #[cfg(not(target_os = "zkvm"))]
-        {
-            self.cpu_sqrt()
-        }
+        self.cpu_sqrt()
     }
 
     pub fn to_u512(self) -> U512 {
@@ -520,4 +545,22 @@ fn sqrt_fq2() {
             .sqrt()
             .is_none()
     );
+}
+
+#[test]
+fn test_fq2_nqr() {
+    let nqr = Fq2::new(Fq::new(2_u64.into()).unwrap(), Fq::one());
+    assert_eq!(nqr.sqrt(), None);
+
+    for _ in 0..100 {
+        // With probability 1/2, a random element is a non-quadratic residue
+        let random = Fq2::random(&mut rand::thread_rng());
+
+        if random.sqrt().is_none() {
+            let has_root = random * nqr;
+            
+            // The product of two non-quadratic residues is a quadratic residue
+            assert!(has_root.sqrt().is_some());
+        }
+    }
 }
