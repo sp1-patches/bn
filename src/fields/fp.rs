@@ -763,7 +763,7 @@ impl Fq {
                     hint_slice(&buf);
                 } else {
                     // `self` is not a square, so we can use a known NQR to constrain the result.
-                    let has_root = nqr_f_q * *self;
+                    let has_root = nqr_f_q.cpu_mul(*self);
                     let root = cpu_sqrt(&has_root).expect("nqr_f_q * self is a quadratic residue if self if not.");
 
                     let bytes = cast::<[u128; 2], [u8; 32]>(root.0 .0);
