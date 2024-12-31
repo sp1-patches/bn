@@ -268,7 +268,7 @@ impl FieldElement for Fq2 {
 
                     hint_slice(&bytes);
                 } else {
-                    unreachable()
+                    unreachable!()
                 }
             }
             let byte_vec = read_vec();
