@@ -460,7 +460,7 @@ impl Fq2 {
                     buf[64] = 1;
                 } else {
                     // hint to the vm the root of the square of the product of self and the known nqr.
-                    let has_root = *self * nqr;
+                    let has_root = self.cpu_mul(nqr);
                     let root = has_root.cpu_sqrt().unwrap();
 
                     let bytes = cast::<Fq2, [u8; 64]>(root);
