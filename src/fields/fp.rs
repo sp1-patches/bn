@@ -101,7 +101,12 @@ impl Fr {
 
     /// Converts a U256 to an Fr regardless of modulus.
     pub fn new_mul_factor(a: U256) -> Self {
-        Fr(a)
+        let mut res = a;
+        res.mul(
+            &U256::one(),
+            &Self::modulus(),
+        );
+        Fr(res)
     }
 
     pub fn interpret(buf: &[u8; 64]) -> Self {
@@ -200,7 +205,7 @@ impl FieldElement for Fr {
             let byte_vec = sp1_lib::io::read_vec();
             let bytes: [u8; 32] = byte_vec.try_into().unwrap();
 
-            let inv = Fr(U256(cast::<[u8; 32], [u128; 2]>(bytes)));
+            let inv = Fr::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))).unwrap();
             
             // Check that the inverse is correct
             assert!(inv * self == Fr::one(), "Invalid hint supplied for Fq inverse");
@@ -425,7 +430,12 @@ impl Fq {
 
     /// Converts a U256 to an Fr regardless of modulus.
     pub fn new_mul_factor(a: U256) -> Self {
-        Fq(a)
+        let mut res = a;
+        res.mul(
+            &U256::one(),
+            &Self::modulus(),
+        );
+        Fq(res)
     }
 
     pub fn interpret(buf: &[u8; 64]) -> Self {
@@ -595,7 +605,7 @@ impl FieldElement for Fq {
             let byte_vec = read_vec();
             let bytes: [u8; 32] = byte_vec.try_into().unwrap();
 
-            let inv = Fq(U256(cast::<[u8; 32], [u128; 2]>(bytes)));
+            let inv = Fq::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))).unwrap();
             
             assert!(inv * self == Fq::one(), "Invalid hint supplied for Fq inverse");
 
@@ -755,7 +765,7 @@ impl Fq {
                 
                 if let Some(root) = cpu_sqrt(self) {
                     // We have a valid square root, lets constrain it.
-                    let bytes = cast::<[u128; 2], [u8; 32]>(root.0 .0);
+                    let bytes = cast::<[u128; 2], [u8; 32]>(root.0.0);
 
                     buf[32] = 1;
                     buf[..32].copy_from_slice(&bytes);
@@ -766,7 +776,7 @@ impl Fq {
                     let has_root = nqr_f_q.cpu_mul(*self);
                     let root = cpu_sqrt(&has_root).expect("nqr_f_q * self is a quadratic residue if self if not.");
 
-                    let bytes = cast::<[u128; 2], [u8; 32]>(root.0 .0);
+                    let bytes = cast::<[u128; 2], [u8; 32]>(root.0.0);
                     
                     buf[32] = 0;
                     buf[..32].copy_from_slice(&bytes);
@@ -781,18 +791,18 @@ impl Fq {
 
             match choice {
                 0 => {
-                    // The hint has indiacted that the square root is not a quadratic residue
+                    // The hint has indicated that the square root is not a quadratic residue
                     //
                     // We can constrain this by using a known NQR.
                     let has_root = nqr_f_q * *self;
-                    let root = Fq(U256(cast::<[u8; 32], [u128; 2]>(bytes)));
+                    let root = Fq::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))).unwrap();
 
                     assert!(root * root == has_root, "Invalid hint supplied for Fq sqrt");
                     
                     return None;
                 },  
                 _ => {
-                    let sqrt = Fq(U256(cast::<[u8; 32], [u128; 2]>(bytes)));
+                    let sqrt = Fq::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))).unwrap();
                     
                     assert!(sqrt * sqrt == *self, "Invalid hint supplied for Fq sqrt");
 
