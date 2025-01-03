@@ -196,6 +196,9 @@ impl<P: GroupParams> AffineG<P> {
     }
 
     pub fn to_jacobian(self) -> G<P> {
+        if self == Self::zero() {
+            return G::<P>::zero();
+        }
         G {
             x: self.x,
             y: self.y,
@@ -236,6 +239,9 @@ impl<P: GroupParams> Copy for AffineG<P> {}
 
 impl AffineG1 {
     pub fn double(&mut self) -> Self {
+        if *self == Self::zero() {
+            return *self;
+        }
         #[cfg(target_os = "zkvm")]
         {
             let mut out = *self;
@@ -258,6 +264,12 @@ impl Add<AffineG1> for AffineG1 {
     // We only need the mutability for the zkvm case.
     #[allow(unused_mut)]
     fn add(mut self, other: AffineG1) -> AffineG1 {
+        if self == Self::zero() {
+            return other;
+        }
+        if other == Self::zero() {
+            return self;
+        }
         #[cfg(target_os = "zkvm")]
         {
             let mut out = self;
@@ -498,9 +510,14 @@ impl<P: GroupParams> Neg for AffineG<P> {
     type Output = AffineG<P>;
 
     fn neg(self) -> AffineG<P> {
-        AffineG {
-            x: self.x,
-            y: -self.y,
+        if self == Self::zero() {
+            self 
+        }
+        else {
+            AffineG {
+                x: self.x,
+                y: -self.y,
+            }
         }
     }
 }
@@ -925,6 +942,7 @@ impl AffineG1 {
         points
             .iter()
             .zip(scalars)
+            .filter(|&(_, s)| !s.is_zero())
             .map(|(&p, &s)| p * s)
             .fold(None, |acc: Option<AffineG1>, p| {
                 acc.map(|acc| acc + p).or(Some(p))
