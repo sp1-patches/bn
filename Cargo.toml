@@ -30,8 +30,7 @@ bytemuck = { version = "1.16.1", features = ["derive"] }
 num-bigint = { version = "0.4.6", default-features = false }
 
 [target.'cfg(target_os = "zkvm")'.dependencies]
-# todo(n): bump this version.
-sp1-lib = { git = "https://github.com/succinctlabs/sp1-wip.git", branch = "dev" }
+sp1-lib = { version = "4.0.0-rc.8" }
 
 [dev-dependencies]
 rand = { version = "0.8.3", features = ["std_rng"] }
