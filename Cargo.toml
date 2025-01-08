@@ -1,9 +1,10 @@
 [package]
-name = "substrate-bn"
-version = "0.6.0"
+name = "substrate-bn-succinct"
+version = "0.6.0-v4-rc.8"
 authors = [
     "Sean Bowe <ewillbefull@gmail.com>",
     "Parity Technologies <admin@parity.io>",
+    "Nathan <n@push0.dev>"
 ]
 description = "Pairing cryptography with the Barreto-Naehrig curve"
 keywords = ["pairing", "crypto", "cryptography"]
