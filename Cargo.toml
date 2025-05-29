@@ -1,5 +1,5 @@
 [package]
-name = "substrate-bn-succinct"
+name = "substrate-bn"
 version = "0.6.0-v5.0.0"
 authors = [
     "Sean Bowe <ewillbefull@gmail.com>",
