@@ -1,6 +1,6 @@
 [package]
 name = "substrate-bn"
-version = "0.6.0-v5.0.0"
+version = "0.6.0"
 authors = [
     "Sean Bowe <ewillbefull@gmail.com>",
     "Parity Technologies <admin@parity.io>",
