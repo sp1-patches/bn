@@ -9,11 +9,10 @@ use super::Sqrt;
 
 #[cfg(target_os = "zkvm")]
 use {
-    bytemuck::{cast_ref, cast_mut, cast},
-    sp1_lib::io::{hint_slice, read_vec},
+    bytemuck::{cast, cast_mut, cast_ref},
     core::convert::TryInto,
+    sp1_lib::io::{hint_slice, read_vec},
 };
-
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, NoUninit, AnyBitPattern)]
 #[repr(C)]
@@ -102,10 +101,7 @@ impl Fr {
     /// Converts a U256 to an Fr regardless of modulus.
     pub fn new_mul_factor(a: U256) -> Self {
         let mut res = a;
-        res.mul(
-            &U256::one(),
-            &Self::modulus(),
-        );
+        res.mul(&U256::one(), &Self::modulus());
         Fr(res)
     }
 
@@ -191,7 +187,7 @@ impl FieldElement for Fr {
 
         #[cfg(target_os = "zkvm")]
         {
-            // Compute the inverse in an unconstrained block 
+            // Compute the inverse in an unconstrained block
             sp1_lib::unconstrained! {
                 // the element was previously checked to be nonzero
                 if let Some(inv) = self.cpu_inverse() {
@@ -206,13 +202,16 @@ impl FieldElement for Fr {
             let bytes: [u8; 32] = byte_vec.try_into().unwrap();
 
             let inv = Fr::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))).unwrap();
-            
+
             // Check that the inverse is correct
-            assert!(inv * self == Fr::one(), "Invalid hint supplied for Fq inverse");
-            
+            assert!(
+                inv * self == Fr::one(),
+                "Invalid hint supplied for Fq inverse"
+            );
+
             return Some(inv);
         }
-        
+
         #[cfg(not(target_os = "zkvm"))]
         self.cpu_inverse()
     }
@@ -271,19 +270,19 @@ impl MulAssign for Fr {
     fn mul_assign(&mut self, other: Fr) {
         #[cfg(target_os = "zkvm")]
         {
-            let mut result: [u32; 8] = [0u32; 8];
-            let lhs = cast::<[u128; 2], [u32; 8]>(self.0 .0);
-            let rhs = cast::<[u128; 2], [u32; 8]>(other.0 .0);
-            let modulus = cast::<[u128; 2], [u32; 8]>(Fr::modulus().0);
+            let mut result: [u64; 4] = [0u64; 4];
+            let lhs = cast::<[u128; 2], [u64; 4]>(self.0 .0);
+            let rhs = cast::<[u128; 2], [u64; 4]>(other.0 .0);
+            let modulus = cast::<[u128; 2], [u64; 4]>(Fr::modulus().0);
             unsafe {
                 sp1_lib::sys_bigint(
-                    &mut result as *mut [u32; 8],
+                    &mut result as *mut [u64; 4],
                     0,
-                    &lhs as *const [u32; 8],
-                    &rhs as *const [u32; 8],
-                    &modulus as *const [u32; 8],
+                    &lhs as *const [u64; 4],
+                    &rhs as *const [u64; 4],
+                    &modulus as *const [u64; 4],
                 );
-                self.0 = U256::from(cast::<[u32; 8], [u64; 4]>(result));
+                self.0 = U256::from(cast::<[u64; 4], [u64; 4]>(result));
             }
         }
         #[cfg(not(target_os = "zkvm"))]
@@ -431,10 +430,7 @@ impl Fq {
     /// Converts a U256 to an Fr regardless of modulus.
     pub fn new_mul_factor(a: U256) -> Self {
         let mut res = a;
-        res.mul(
-            &U256::one(),
-            &Self::modulus(),
-        );
+        res.mul(&U256::one(), &Self::modulus());
         Fq(res)
     }
 
@@ -518,8 +514,8 @@ impl Fq {
     pub(crate) fn add_inp(&mut self, other: &Fq) {
         #[cfg(target_os = "zkvm")]
         {
-            let mut lhs = cast_mut::<Fq, [u32; 8]>(self);
-            let rhs = cast_ref::<Fq, [u32; 8]>(&other);
+            let mut lhs = cast_mut::<Fq, [u64; 4]>(self);
+            let rhs = cast_ref::<Fq, [u64; 4]>(&other);
             unsafe {
                 sp1_lib::syscall_bn254_fp_addmod(lhs.as_mut_ptr(), rhs.as_ptr());
             }
@@ -535,8 +531,8 @@ impl Fq {
     pub(crate) fn sub_inp(&mut self, other: &Fq) {
         #[cfg(target_os = "zkvm")]
         {
-            let mut lhs = cast_mut::<Fq, [u32; 8]>(self);
-            let rhs = cast_ref::<Fq, [u32; 8]>(&other);
+            let mut lhs = cast_mut::<Fq, [u64; 4]>(self);
+            let rhs = cast_ref::<Fq, [u64; 4]>(&other);
             unsafe {
                 sp1_lib::syscall_bn254_fp_submod(lhs.as_mut_ptr(), rhs.as_ptr());
             }
@@ -552,8 +548,8 @@ impl Fq {
     pub(crate) fn mul_inp(&mut self, other: &Fq) {
         #[cfg(target_os = "zkvm")]
         {
-            let lhs = cast_mut::<Fq, [u32; 8]>(self);
-            let rhs = cast_ref::<Fq, [u32; 8]>(&other);
+            let lhs = cast_mut::<Fq, [u64; 4]>(self);
+            let rhs = cast_ref::<Fq, [u64; 4]>(&other);
             unsafe {
                 sp1_lib::syscall_bn254_fp_mulmod(lhs.as_mut_ptr(), rhs.as_ptr());
             }
@@ -606,12 +602,15 @@ impl FieldElement for Fq {
             let bytes: [u8; 32] = byte_vec.try_into().unwrap();
 
             let inv = Fq::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))).unwrap();
-            
-            assert!(inv * self == Fq::one(), "Invalid hint supplied for Fq inverse");
+
+            assert!(
+                inv * self == Fq::one(),
+                "Invalid hint supplied for Fq inverse"
+            );
 
             return Some(inv);
         }
-        
+
         #[cfg(not(target_os = "zkvm"))]
         self.cpu_inverse()
     }
@@ -762,7 +761,7 @@ impl Fq {
             // We can hint back to the VM and contrain for correctness.
             sp1_lib::unconstrained! {
                 let mut buf = [0u8; 33];
-                
+
                 if let Some(root) = cpu_sqrt(self) {
                     // We have a valid square root, lets constrain it.
                     let bytes = cast::<[u128; 2], [u8; 32]>(root.0.0);
@@ -777,10 +776,10 @@ impl Fq {
                     let root = cpu_sqrt(&has_root).expect("nqr_f_q * self is a quadratic residue if self if not.");
 
                     let bytes = cast::<[u128; 2], [u8; 32]>(root.0.0);
-                    
+
                     buf[32] = 0;
                     buf[..32].copy_from_slice(&bytes);
-                    
+
                     hint_slice(&buf);
                 }
             }
@@ -798,12 +797,12 @@ impl Fq {
                     let root = Fq::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))).unwrap();
 
                     assert!(root * root == has_root, "Invalid hint supplied for Fq sqrt");
-                    
+
                     return None;
-                },  
+                }
                 _ => {
                     let sqrt = Fq::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))).unwrap();
-                    
+
                     assert!(sqrt * sqrt == *self, "Invalid hint supplied for Fq sqrt");
 
                     return Some(sqrt);

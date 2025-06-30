@@ -331,11 +331,11 @@ impl U256 {
         {
             unsafe {
                 sp1_lib::sys_bigint(
-                    (&mut self.0) as *mut [u128; 2] as *mut [u32; 8],
+                    (&mut self.0) as *mut [u128; 2] as *mut [u64; 4],
                     0,
-                    (&self.0) as *const [u128; 2] as *const [u32; 8],
-                    (&other.0) as *const [u128; 2] as *const [u32; 8],
-                    (&modulo.0) as *const [u128; 2] as *const [u32; 8],
+                    (&self.0) as *const [u128; 2] as *const [u64; 4],
+                    (&other.0) as *const [u128; 2] as *const [u64; 4],
+                    (&modulo.0) as *const [u128; 2] as *const [u64; 4],
                 );
             }
         }

@@ -140,8 +140,8 @@ impl Fq2 {
     pub(crate) fn add_inp(&mut self, other: &Fq2) {
         #[cfg(target_os = "zkvm")]
         {
-            let lhs = cast_mut::<Fq2, [u32; 16]>(self);
-            let rhs = cast_ref::<Fq2, [u32; 16]>(&other);
+            let lhs = cast_mut::<Fq2, [u64; 8]>(self);
+            let rhs = cast_ref::<Fq2, [u64; 8]>(&other);
             unsafe {
                 sp1_lib::syscall_bn254_fp2_addmod(lhs.as_mut_ptr(), rhs.as_ptr());
             }
@@ -156,8 +156,8 @@ impl Fq2 {
     pub(crate) fn sub_inp(&mut self, other: &Fq2) {
         #[cfg(target_os = "zkvm")]
         {
-            let lhs = cast_mut::<Fq2, [u32; 16]>(self);
-            let rhs = cast_ref::<Fq2, [u32; 16]>(&other);
+            let lhs = cast_mut::<Fq2, [u64; 8]>(self);
+            let rhs = cast_ref::<Fq2, [u64; 8]>(&other);
             unsafe {
                 sp1_lib::syscall_bn254_fp2_submod(lhs.as_mut_ptr(), rhs.as_ptr());
             }
@@ -172,8 +172,8 @@ impl Fq2 {
     pub(crate) fn mul_inp(&mut self, other: &Fq2) {
         #[cfg(target_os = "zkvm")]
         {
-            let lhs = cast_mut::<Fq2, [u32; 16]>(self);
-            let rhs = cast_ref::<Fq2, [u32; 16]>(&other);
+            let lhs = cast_mut::<Fq2, [u64; 8]>(self);
+            let rhs = cast_ref::<Fq2, [u64; 8]>(&other);
             unsafe {
                 sp1_lib::syscall_bn254_fp2_mulmod(lhs.as_mut_ptr(), rhs.as_ptr());
             }
@@ -188,7 +188,7 @@ impl Fq2 {
     pub fn square_inp(&mut self) {
         #[cfg(target_os = "zkvm")]
         {
-            let lhs = cast_mut::<Fq2, [u32; 16]>(self);
+            let lhs = cast_mut::<Fq2, [u64; 8]>(self);
             unsafe {
                 sp1_lib::syscall_bn254_fp2_mulmod(lhs.as_mut_ptr(), lhs.as_ptr());
             }
@@ -203,7 +203,7 @@ impl Fq2 {
     pub fn double_inp(&mut self) {
         #[cfg(target_os = "zkvm")]
         {
-            let lhs = cast_mut::<Fq2, [u32; 16]>(self);
+            let lhs = cast_mut::<Fq2, [u64; 8]>(self);
             unsafe {
                 sp1_lib::syscall_bn254_fp2_addmod(lhs.as_mut_ptr(), lhs.as_ptr());
             }
@@ -254,13 +254,13 @@ impl FieldElement for Fq2 {
     fn inverse(self) -> Option<Self> {
         // "High-Speed Software Implementation of the Optimal Ate Pairing
         // over Barreto–Naehrig Curves"; Algorithm 8
-        
+
         if self.is_zero() {
             return None;
         }
 
         #[cfg(target_os = "zkvm")]
-        {   
+        {
             sp1_lib::unconstrained! {
                 // The elements was previously checked to be non-zero
                 if let Some(inv) = self.cpu_inverse() {
@@ -273,17 +273,23 @@ impl FieldElement for Fq2 {
             }
             let byte_vec = read_vec();
             let bytes: [u8; 64] = byte_vec.try_into().unwrap();
-            let inv0 = Fq::new(U256(cast::<[u8; 32], [u128; 2]>(bytes[0..32].try_into().unwrap()))).unwrap();
-            let inv1 = Fq::new(U256(cast::<[u8; 32], [u128; 2]>(bytes[32..].try_into().unwrap()))).unwrap();
+            let inv0 = Fq::new(U256(cast::<[u8; 32], [u128; 2]>(
+                bytes[0..32].try_into().unwrap(),
+            )))
+            .unwrap();
+            let inv1 = Fq::new(U256(cast::<[u8; 32], [u128; 2]>(
+                bytes[32..].try_into().unwrap(),
+            )))
+            .unwrap();
             let inv = Fq2::new(inv0, inv1);
-                
+
             assert!(inv * self == Fq2::one(), "Invalid hint for inverse");
 
             Some(inv)
         }
-       
+
         #[cfg(not(target_os = "zkvm"))]
-        self.cpu_inverse() 
+        self.cpu_inverse()
     }
 }
 
@@ -455,7 +461,7 @@ impl Fq2 {
 
             sp1_lib::unconstrained! {
                 let mut buf = [0u8; 65];
-                
+
                 if let Some(root) = self.cpu_sqrt() {
                     let bytes = cast::<Fq2, [u8; 64]>(root);
                     buf[0..64].copy_from_slice(&bytes);
@@ -474,22 +480,28 @@ impl Fq2 {
             }
             let byte_vec = read_vec();
             let bytes: [u8; 65] = byte_vec.try_into().unwrap();
-            let root0 = Fq::new(U256(cast::<[u8; 32], [u128; 2]>(bytes[0..32].try_into().unwrap()))).unwrap();
-            let root1 = Fq::new(U256(cast::<[u8; 32], [u128; 2]>(bytes[32..64].try_into().unwrap()))).unwrap();
+            let root0 = Fq::new(U256(cast::<[u8; 32], [u128; 2]>(
+                bytes[0..32].try_into().unwrap(),
+            )))
+            .unwrap();
+            let root1 = Fq::new(U256(cast::<[u8; 32], [u128; 2]>(
+                bytes[32..64].try_into().unwrap(),
+            )))
+            .unwrap();
             let root = Fq2::new(root0, root1);
 
             match bytes[64] {
                 0 => {
                     assert!(root * root == *self * nqr, "Invalid hint for sqrt");
                     None
-                },
+                }
                 _ => {
                     assert!(root * root == *self, "Invalid hint for sqrt");
                     Some(root)
                 }
             }
         }
-        
+
         #[cfg(not(target_os = "zkvm"))]
         self.cpu_sqrt()
     }
@@ -557,7 +569,7 @@ fn test_fq2_nqr() {
 
         if random.sqrt().is_none() {
             let has_root = random * nqr;
-            
+
             // The product of two non-quadratic residues is a quadratic residue
             assert!(has_root.sqrt().is_some());
         }
