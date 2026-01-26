@@ -1,6 +1,6 @@
 [package]
 name = "substrate-bn-succinct"
-version = "0.6.0-v5.0.0"
+version = "0.6.0-v6.0.0-beta.1"
 authors = [
     "Sean Bowe <ewillbefull@gmail.com>",
     "Parity Technologies <admin@parity.io>",
@@ -31,7 +31,7 @@ bytemuck = { version = "1.16.1", features = ["derive"] }
 num-bigint = { version = "0.4.6", default-features = false }
 
 [target.'cfg(target_os = "zkvm")'.dependencies]
-sp1-lib = { version = "5.0.0" }
+sp1-lib = { version = "6.0.0-beta.1", git = "https://github.com/succinctlabs/sp1-wip", branch = "tobias/p3-0.2.4-succinct" }
 
 [dev-dependencies]
 rand = { version = "0.8.3", features = ["std_rng"] }
