@@ -4,8 +4,6 @@ use crate::fields::{const_fq, fq2_nonresidue, FieldElement, Fq, Fq12, Fq2, Fr, S
 use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt::Display;
-#[cfg(target_os = "zkvm")]
-use core::mem::transmute;
 use core::ops::AddAssign;
 use core::{
     fmt,
@@ -13,8 +11,6 @@ use core::{
 };
 
 use rand::Rng;
-#[cfg(target_os = "zkvm")]
-use sp1_lib::{syscall_bn254_add, syscall_bn254_double};
 // This is the NAF version of ate_loop_count. Entries are all mod 4, so 3 = -1
 // n.b. ate_loop_count = 0x19d797039be763ba8
 //                     = 11001110101111001011100000011100110111110011101100011101110101000
@@ -242,51 +238,28 @@ impl AffineG1 {
         if *self == Self::zero() {
             return *self;
         }
-        #[cfg(target_os = "zkvm")]
-        {
-            let mut out = *self;
-            unsafe { syscall_bn254_double(transmute(&mut out)) };
-            out
-        }
-        #[cfg(not(target_os = "zkvm"))]
-        {
-            let p: G1 = (*self).to_jacobian();
-            (p + p)
-                .to_affine()
-                .expect("Unable to convert G1 to AffineG1")
-        }
+        let p: G1 = (*self).to_jacobian();
+        (p + p)
+            .to_affine()
+            .expect("Unable to convert G1 to AffineG1")
     }
 }
 
 impl Add<AffineG1> for AffineG1 {
     type Output = AffineG1;
 
-    // We only need the mutability for the zkvm case.
-    #[allow(unused_mut)]
-    fn add(mut self, other: AffineG1) -> AffineG1 {
+    fn add(self, other: AffineG1) -> AffineG1 {
         if self == Self::zero() {
             return other;
         }
         if other == Self::zero() {
             return self;
         }
-        #[cfg(target_os = "zkvm")]
-        {
-            let mut out = self;
-            if self == other {
-                return self.double();
-            }
-            unsafe { syscall_bn254_add(transmute(&mut out), transmute(&other)) };
-            out
-        }
-        #[cfg(not(target_os = "zkvm"))]
-        {
-            let p: G1 = self.to_jacobian();
-            let q: G1 = other.to_jacobian();
-            (p + q)
-                .to_affine()
-                .expect("Unable to convert G1 to AffineG1")
-        }
+        let p: G1 = self.to_jacobian();
+        let q: G1 = other.to_jacobian();
+        (p + q)
+            .to_affine()
+            .expect("Unable to convert G1 to AffineG1")
     }
 }
 
@@ -511,9 +484,8 @@ impl<P: GroupParams> Neg for AffineG<P> {
 
     fn neg(self) -> AffineG<P> {
         if self == Self::zero() {
-            self 
-        }
-        else {
+            self
+        } else {
             AffineG {
                 x: self.x,
                 y: -self.y,
