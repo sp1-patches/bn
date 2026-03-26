@@ -270,12 +270,15 @@ impl Add<AffineG1> for AffineG1 {
         if other == Self::zero() {
             return self;
         }
+        if self == other {
+            return self.double();
+        }
+        if self.x == other.x {
+            return Self::zero();
+        }
         #[cfg(target_os = "zkvm")]
         {
             let mut out = self;
-            if self == other {
-                return self.double();
-            }
             unsafe { syscall_bn254_add(transmute(&mut out), transmute(&other)) };
             out
         }
