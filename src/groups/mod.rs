@@ -101,6 +101,7 @@ impl<P: GroupParams> G<P> {
 }
 
 #[derive(Debug, Default)]
+#[repr(C)]
 pub struct AffineG<P: GroupParams> {
     x: P::Base,
     y: P::Base,
@@ -238,19 +239,19 @@ impl<P: GroupParams> Clone for AffineG<P> {
 impl<P: GroupParams> Copy for AffineG<P> {}
 
 impl AffineG1 {
-    pub fn double(&mut self) -> Self {
-        if *self == Self::zero() {
-            return *self;
+    pub fn double(self) -> Self {
+        if self == Self::zero() {
+            return self;
         }
         #[cfg(target_os = "zkvm")]
         {
-            let mut out = *self;
+            let mut out = self;
             unsafe { syscall_bn254_double(transmute(&mut out)) };
             out
         }
         #[cfg(not(target_os = "zkvm"))]
         {
-            let p: G1 = (*self).to_jacobian();
+            let p: G1 = self.to_jacobian();
             (p + p)
                 .to_affine()
                 .expect("Unable to convert G1 to AffineG1")
@@ -305,22 +306,22 @@ impl Mul<Fr> for AffineG1 {
     type Output = AffineG1;
 
     fn mul(self, other: Fr) -> AffineG1 {
-        let mut res: Option<AffineG1> = None;
+        let mut res = AffineG1::zero();
         let mut found_one = false;
 
         for i in U256::from(other).bits() {
             if found_one {
-                res = res.map(|mut p| p.double());
+                res = res.double();
             }
 
             #[allow(clippy::suspicious_arithmetic_impl)]
             if i {
                 found_one = true;
-                res = res.map(|p| p + self).or(Some(self));
+                res = res + self;
             }
         }
 
-        res.unwrap()
+        res
     }
 }
 
@@ -947,10 +948,9 @@ impl AffineG1 {
             .zip(scalars)
             .filter(|&(_, s)| !s.is_zero())
             .map(|(&p, &s)| p * s)
-            .fold(None, |acc: Option<AffineG1>, p| {
-                acc.map(|acc| acc + p).or(Some(p))
+            .fold(AffineG1::zero(), |acc: AffineG1, p| {
+                acc + p
             })
-            .unwrap()
     }
 }
 

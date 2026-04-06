@@ -346,7 +346,7 @@ impl PartialOrd for Fq {
             .find_map(|(l, r)| match l.cmp(r) {
                 core::cmp::Ordering::Equal => None,
                 ord => Some(ord),
-            })
+            }).or(Some(core::cmp::Ordering::Equal))
     }
 }
 
