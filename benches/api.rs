@@ -1,6 +1,6 @@
 #![feature(test)]
 
-use substrate_bn::*;
+use substrate_bn_succinct_rs::*;
 
 const SAMPLES: usize = 30;
 
