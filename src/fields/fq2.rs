@@ -280,18 +280,27 @@ impl FieldElement for Fq2 {
                 }
             }
             let byte_vec = read_vec();
-            let bytes: [u8; 64] = byte_vec.try_into().unwrap();
-            let inv0 = Fq::new(U256(cast::<[u8; 32], [u128; 2]>(
+            let bytes: [u8; 64] = match byte_vec.try_into() {
+                Ok(b) => b,
+                Err(_) => crate::halt_invalid_hint(),
+            };
+            let inv0 = match Fq::new(U256(cast::<[u8; 32], [u128; 2]>(
                 bytes[0..32].try_into().unwrap(),
-            )))
-            .unwrap();
-            let inv1 = Fq::new(U256(cast::<[u8; 32], [u128; 2]>(
+            ))) {
+                Some(v) => v,
+                None => crate::halt_invalid_hint(),
+            };
+            let inv1 = match Fq::new(U256(cast::<[u8; 32], [u128; 2]>(
                 bytes[32..].try_into().unwrap(),
-            )))
-            .unwrap();
+            ))) {
+                Some(v) => v,
+                None => crate::halt_invalid_hint(),
+            };
             let inv = Fq2::new(inv0, inv1);
 
-            assert!(inv * self == Fq2::one(), "Invalid hint for inverse");
+            if inv * self != Fq2::one() {
+                crate::halt_invalid_hint();
+            }
 
             Some(inv)
         }
@@ -487,24 +496,35 @@ impl Fq2 {
                 hint_slice(&buf);
             }
             let byte_vec = read_vec();
-            let bytes: [u8; 65] = byte_vec.try_into().unwrap();
-            let root0 = Fq::new(U256(cast::<[u8; 32], [u128; 2]>(
+            let bytes: [u8; 65] = match byte_vec.try_into() {
+                Ok(b) => b,
+                Err(_) => crate::halt_invalid_hint(),
+            };
+            let root0 = match Fq::new(U256(cast::<[u8; 32], [u128; 2]>(
                 bytes[0..32].try_into().unwrap(),
-            )))
-            .unwrap();
-            let root1 = Fq::new(U256(cast::<[u8; 32], [u128; 2]>(
+            ))) {
+                Some(v) => v,
+                None => crate::halt_invalid_hint(),
+            };
+            let root1 = match Fq::new(U256(cast::<[u8; 32], [u128; 2]>(
                 bytes[32..64].try_into().unwrap(),
-            )))
-            .unwrap();
+            ))) {
+                Some(v) => v,
+                None => crate::halt_invalid_hint(),
+            };
             let root = Fq2::new(root0, root1);
 
             match bytes[64] {
                 0 => {
-                    assert!(root * root == *self * nqr, "Invalid hint for sqrt");
+                    if root * root != *self * nqr {
+                        crate::halt_invalid_hint();
+                    }
                     None
                 }
                 _ => {
-                    assert!(root * root == *self, "Invalid hint for sqrt");
+                    if root * root != *self {
+                        crate::halt_invalid_hint();
+                    }
                     Some(root)
                 }
             }

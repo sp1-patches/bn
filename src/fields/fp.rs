@@ -199,15 +199,20 @@ impl FieldElement for Fr {
             }
 
             let byte_vec = sp1_lib::io::read_vec();
-            let bytes: [u8; 32] = byte_vec.try_into().unwrap();
+            let bytes: [u8; 32] = match byte_vec.try_into() {
+                Ok(b) => b,
+                Err(_) => crate::halt_invalid_hint(),
+            };
 
-            let inv = Fr::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))).unwrap();
+            let inv = match Fr::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))) {
+                Some(v) => v,
+                None => crate::halt_invalid_hint(),
+            };
 
             // Check that the inverse is correct
-            assert!(
-                inv * self == Fr::one(),
-                "Invalid hint supplied for Fq inverse"
-            );
+            if inv * self != Fr::one() {
+                crate::halt_invalid_hint();
+            }
 
             return Some(inv);
         }
@@ -599,14 +604,19 @@ impl FieldElement for Fq {
                 }
             }
             let byte_vec = read_vec();
-            let bytes: [u8; 32] = byte_vec.try_into().unwrap();
+            let bytes: [u8; 32] = match byte_vec.try_into() {
+                Ok(b) => b,
+                Err(_) => crate::halt_invalid_hint(),
+            };
 
-            let inv = Fq::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))).unwrap();
+            let inv = match Fq::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))) {
+                Some(v) => v,
+                None => crate::halt_invalid_hint(),
+            };
 
-            assert!(
-                inv * self == Fq::one(),
-                "Invalid hint supplied for Fq inverse"
-            );
+            if inv * self != Fq::one() {
+                crate::halt_invalid_hint();
+            }
 
             return Some(inv);
         }
@@ -785,8 +795,14 @@ impl Fq {
             }
 
             let byte_vec = read_vec();
+            if byte_vec.len() != 33 {
+                crate::halt_invalid_hint();
+            }
             let choice = byte_vec[32];
-            let bytes: [u8; 32] = byte_vec[..32].try_into().unwrap();
+            let bytes: [u8; 32] = match byte_vec[..32].try_into() {
+                Ok(b) => b,
+                Err(_) => crate::halt_invalid_hint(),
+            };
 
             match choice {
                 0 => {
@@ -794,16 +810,26 @@ impl Fq {
                     //
                     // We can constrain this by using a known NQR.
                     let has_root = nqr_f_q * *self;
-                    let root = Fq::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))).unwrap();
+                    let root = match Fq::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))) {
+                        Some(v) => v,
+                        None => crate::halt_invalid_hint(),
+                    };
 
-                    assert!(root * root == has_root, "Invalid hint supplied for Fq sqrt");
+                    if root * root != has_root {
+                        crate::halt_invalid_hint();
+                    }
 
                     return None;
                 }
                 _ => {
-                    let sqrt = Fq::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))).unwrap();
+                    let sqrt = match Fq::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))) {
+                        Some(v) => v,
+                        None => crate::halt_invalid_hint(),
+                    };
 
-                    assert!(sqrt * sqrt == *self, "Invalid hint supplied for Fq sqrt");
+                    if sqrt * sqrt != *self {
+                        crate::halt_invalid_hint();
+                    }
 
                     return Some(sqrt);
                 }
