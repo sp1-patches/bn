@@ -6,6 +6,14 @@ pub mod arith;
 mod fields;
 mod groups;
 
+/// On invalid prover hints, halt the zkVM with exit code 3 instead of panicking.
+/// This prevents a malicious prover from forging a regular `panic` (exit code 1).
+#[cfg(target_os = "zkvm")]
+#[inline(never)]
+pub(crate) fn halt_invalid_hint() -> ! {
+    unsafe { sp1_lib::syscall_halt(3) }
+}
+
 use crate::fields::FieldElement;
 use crate::groups::{G1Params, G2Params, GroupElement, GroupParams};
 
