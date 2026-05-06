@@ -201,17 +201,17 @@ impl FieldElement for Fr {
             let byte_vec = sp1_lib::io::read_vec();
             let bytes: [u8; 32] = match byte_vec.try_into() {
                 Ok(b) => b,
-                Err(_) => crate::halt_invalid_hint(),
+                Err(_) => sp1_lib::halt_invalid_hint(),
             };
 
             let inv = match Fr::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))) {
                 Some(v) => v,
-                None => crate::halt_invalid_hint(),
+                None => sp1_lib::halt_invalid_hint(),
             };
 
             // Check that the inverse is correct
             if inv * self != Fr::one() {
-                crate::halt_invalid_hint();
+                sp1_lib::halt_invalid_hint();
             }
 
             return Some(inv);
@@ -606,16 +606,16 @@ impl FieldElement for Fq {
             let byte_vec = read_vec();
             let bytes: [u8; 32] = match byte_vec.try_into() {
                 Ok(b) => b,
-                Err(_) => crate::halt_invalid_hint(),
+                Err(_) => sp1_lib::halt_invalid_hint(),
             };
 
             let inv = match Fq::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))) {
                 Some(v) => v,
-                None => crate::halt_invalid_hint(),
+                None => sp1_lib::halt_invalid_hint(),
             };
 
             if inv * self != Fq::one() {
-                crate::halt_invalid_hint();
+                sp1_lib::halt_invalid_hint();
             }
 
             return Some(inv);
@@ -796,12 +796,12 @@ impl Fq {
 
             let byte_vec = read_vec();
             if byte_vec.len() != 33 {
-                crate::halt_invalid_hint();
+                sp1_lib::halt_invalid_hint();
             }
             let choice = byte_vec[32];
             let bytes: [u8; 32] = match byte_vec[..32].try_into() {
                 Ok(b) => b,
-                Err(_) => crate::halt_invalid_hint(),
+                Err(_) => sp1_lib::halt_invalid_hint(),
             };
 
             match choice {
@@ -812,11 +812,11 @@ impl Fq {
                     let has_root = nqr_f_q * *self;
                     let root = match Fq::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))) {
                         Some(v) => v,
-                        None => crate::halt_invalid_hint(),
+                        None => sp1_lib::halt_invalid_hint(),
                     };
 
                     if root * root != has_root {
-                        crate::halt_invalid_hint();
+                        sp1_lib::halt_invalid_hint();
                     }
 
                     return None;
@@ -824,11 +824,11 @@ impl Fq {
                 _ => {
                     let sqrt = match Fq::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))) {
                         Some(v) => v,
-                        None => crate::halt_invalid_hint(),
+                        None => sp1_lib::halt_invalid_hint(),
                     };
 
                     if sqrt * sqrt != *self {
-                        crate::halt_invalid_hint();
+                        sp1_lib::halt_invalid_hint();
                     }
 
                     return Some(sqrt);
