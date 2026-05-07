@@ -201,17 +201,17 @@ impl FieldElement for Fr {
             let byte_vec = sp1_lib::io::read_vec();
             let bytes: [u8; 32] = match byte_vec.try_into() {
                 Ok(b) => b,
-                Err(_) => sp1_lib::halt_invalid_hint(),
+                Err(_) => sp1_lib::invalid_hint!("Fr inverse: hint is not 32 bytes"),
             };
 
             let inv = match Fr::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))) {
                 Some(v) => v,
-                None => sp1_lib::halt_invalid_hint(),
+                None => sp1_lib::invalid_hint!("Fr inverse: hint is not canonical"),
             };
 
             // Check that the inverse is correct
             if inv * self != Fr::one() {
-                sp1_lib::halt_invalid_hint();
+                sp1_lib::invalid_hint!("Fr inverse: hint did not invert self");
             }
 
             return Some(inv);
@@ -606,16 +606,16 @@ impl FieldElement for Fq {
             let byte_vec = read_vec();
             let bytes: [u8; 32] = match byte_vec.try_into() {
                 Ok(b) => b,
-                Err(_) => sp1_lib::halt_invalid_hint(),
+                Err(_) => sp1_lib::invalid_hint!("Fq inverse: hint is not 32 bytes"),
             };
 
             let inv = match Fq::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))) {
                 Some(v) => v,
-                None => sp1_lib::halt_invalid_hint(),
+                None => sp1_lib::invalid_hint!("Fq inverse: hint is not canonical"),
             };
 
             if inv * self != Fq::one() {
-                sp1_lib::halt_invalid_hint();
+                sp1_lib::invalid_hint!("Fq inverse: hint did not invert self");
             }
 
             return Some(inv);
@@ -796,12 +796,15 @@ impl Fq {
 
             let byte_vec = read_vec();
             if byte_vec.len() != 33 {
-                sp1_lib::halt_invalid_hint();
+                sp1_lib::invalid_hint!(
+                    "Fq sqrt: hint length is {}, expected 33",
+                    byte_vec.len()
+                );
             }
             let choice = byte_vec[32];
             let bytes: [u8; 32] = match byte_vec[..32].try_into() {
                 Ok(b) => b,
-                Err(_) => sp1_lib::halt_invalid_hint(),
+                Err(_) => sp1_lib::invalid_hint!("Fq sqrt: root hint is not 32 bytes"),
             };
 
             match choice {
@@ -812,11 +815,15 @@ impl Fq {
                     let has_root = nqr_f_q * *self;
                     let root = match Fq::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))) {
                         Some(v) => v,
-                        None => sp1_lib::halt_invalid_hint(),
+                        None => sp1_lib::invalid_hint!(
+                            "Fq sqrt: NQR-root hint is not canonical"
+                        ),
                     };
 
                     if root * root != has_root {
-                        sp1_lib::halt_invalid_hint();
+                        sp1_lib::invalid_hint!(
+                            "Fq sqrt: NQR-root hint failed root^2 = self*nqr"
+                        );
                     }
 
                     return None;
@@ -824,11 +831,11 @@ impl Fq {
                 _ => {
                     let sqrt = match Fq::new(U256(cast::<[u8; 32], [u128; 2]>(bytes))) {
                         Some(v) => v,
-                        None => sp1_lib::halt_invalid_hint(),
+                        None => sp1_lib::invalid_hint!("Fq sqrt: root hint is not canonical"),
                     };
 
                     if sqrt * sqrt != *self {
-                        sp1_lib::halt_invalid_hint();
+                        sp1_lib::invalid_hint!("Fq sqrt: root hint failed root^2 = self");
                     }
 
                     return Some(sqrt);
