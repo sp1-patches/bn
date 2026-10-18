@@ -743,7 +743,17 @@ impl Fq {
         res
     }
 
+    /// Returns the smaller root, which may differ from the original crate.
     pub fn sqrt(&self) -> Option<Self> {
+        fn canonical_root(root: Fq) -> Fq {
+            let neg_root = -root;
+            if root < neg_root {
+                root
+            } else {
+                neg_root
+            }
+        }
+
         // This is used for arithmetic in unconstrained mode
         fn cpu_sqrt(f: &Fq) -> Option<Fq> {
             let a1 = f.cpu_pow(*FQ_MINUS3_DIV4);
@@ -838,13 +848,13 @@ impl Fq {
                         sp1_lib::invalid_hint!("Fq sqrt: root hint failed root^2 = self");
                     }
 
-                    return Some(sqrt);
+                    return Some(canonical_root(sqrt));
                 }
             }
         }
 
         #[cfg(not(target_os = "zkvm"))]
-        cpu_sqrt(self)
+        cpu_sqrt(self).map(canonical_root)
     }
 }
 

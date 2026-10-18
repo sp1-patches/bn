@@ -467,7 +467,17 @@ impl Fq2 {
         }
     }
 
+    /// Returns the smaller root in this type's lexicographic order; this may differ from the original crate.
     pub fn sqrt(&self) -> Option<Self> {
+        fn canonical_root(root: Fq2) -> Fq2 {
+            let neg_root = -root;
+            if root < neg_root {
+                root
+            } else {
+                neg_root
+            }
+        }
+
         #[cfg(target_os = "zkvm")]
         {
             if self.is_zero() {
@@ -527,13 +537,13 @@ impl Fq2 {
                     if root * root != *self {
                         sp1_lib::invalid_hint!("Fq2 sqrt: root hint failed root^2 = self");
                     }
-                    Some(root)
+                    Some(canonical_root(root))
                 }
             }
         }
 
         #[cfg(not(target_os = "zkvm"))]
-        self.cpu_sqrt()
+        self.cpu_sqrt().map(canonical_root)
     }
 
     pub fn to_u512(self) -> U512 {
