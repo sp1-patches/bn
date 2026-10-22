@@ -220,7 +220,7 @@ impl U256 {
     }
 
     pub fn to_big_endian(&self, s: &mut [u8]) -> Result<(), Error> {
-        if s.len() > 32 {
+        if s.len() != 32 {
             return Err(Error::InvalidLength {
                 expected: 32,
                 actual: s.len(),
