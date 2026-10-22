@@ -193,7 +193,7 @@ pub use crate::groups::Error as GroupError;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd)]
 #[repr(C)]
-pub struct Fq(pub fields::Fq);
+pub struct Fq(pub(crate) fields::Fq);
 
 impl Fq {
     pub fn zero() -> Self {
@@ -304,7 +304,7 @@ impl Ord for Fq {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[repr(C)]
-pub struct Fq2(pub fields::Fq2);
+pub struct Fq2(pub(crate) fields::Fq2);
 
 impl Fq2 {
     pub fn one() -> Fq2 {
@@ -480,6 +480,7 @@ impl G1 {
     }
 
     pub fn msm(points: &[Self], scalars: &[Fr]) -> Self {
+        assert_eq!(points.len(), scalars.len(), "MSM length mismatch");
         G1(groups::G1::msm_variable_base(
             &points.iter().map(|p| p.0).collect::<Vec<_>>(),
             &scalars.iter().map(|x| x.0).collect::<Vec<_>>(),
@@ -598,6 +599,7 @@ impl AffineG1 {
     }
 
     pub fn msm(points: &[Self], scalars: &[Fr]) -> Self {
+        assert_eq!(points.len(), scalars.len(), "MSM length mismatch");
         AffineG1(groups::AffineG1::msm_variable_base(
             &points.iter().map(|p| p.0).collect::<Vec<_>>(),
             &scalars.iter().map(|x| x.0).collect::<Vec<_>>(),

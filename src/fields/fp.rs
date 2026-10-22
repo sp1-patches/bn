@@ -331,7 +331,7 @@ impl From<u64> for Fr {
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, NoUninit, AnyBitPattern, Ord)]
 #[repr(C)]
-pub struct Fq(pub U256);
+pub struct Fq(pub(crate) U256);
 
 impl From<Fq> for U256 {
     #[inline]
