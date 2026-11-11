@@ -313,6 +313,29 @@ impl U256 {
     }
 
     pub(crate) fn cpu_mul(&mut self, other: &U256, modulo: &U256) {
+        // Outside the zkVM, multiply modulo the two BN254 moduli with Montgomery reduction
+        // instead of a 512-bit long division (`divrem`), which made native pairings ~57x slower
+        // than upstream substrate-bn. The values stay in normal (non-Montgomery) form: two
+        // reductions, REDC(REDC(a, b), R^2) = a*b mod p. Inside the zkVM (unconstrained hints)
+        // and for any other modulus or a non-reduced operand, the original path below is used
+        // unchanged.
+        #[cfg(not(target_os = "zkvm"))]
+        {
+            if let Some((r2, inv)) = montgomery_params(modulo) {
+                if *self < *modulo && *other < *modulo {
+                    mul_reduce(&mut self.0, &other.0, &modulo.0, inv);
+                    if *self >= *modulo {
+                        sub_noborrow(&mut self.0, &modulo.0);
+                    }
+                    mul_reduce(&mut self.0, &r2.0, &modulo.0, inv);
+                    if *self >= *modulo {
+                        sub_noborrow(&mut self.0, &modulo.0);
+                    }
+                    return;
+                }
+            }
+        }
+
         let mut res = [0u128; 4];
 
         unroll! {
@@ -563,6 +586,53 @@ fn mac_digit(from_index: usize, acc: &mut [u128; 4], b: &[u128; 2], c: u128) {
     }
 
     debug_assert!(carry == 0);
+}
+
+// Montgomery parameters (R^2 mod p, -p^-1 mod 2^128) for the two BN254 moduli, taken
+// from upstream substrate-bn 0.6.0's `field_impl!` for Fr and Fq. Native-only fast path of
+// `U256::cpu_mul`.
+#[cfg(not(target_os = "zkvm"))]
+fn montgomery_params(modulo: &U256) -> Option<(U256, u128)> {
+    const FR_MODULUS: [u64; 4] =
+        [0x43e1f593f0000001, 0x2833e84879b97091, 0xb85045b68181585d, 0x30644e72e131a029];
+    const FR_R2: [u64; 4] =
+        [0x1bb8e645ae216da7, 0x53fe3ab1e35c59e3, 0x8c49833d53bb8085, 0x0216d0b17f4e44a5];
+    const FR_INV: u128 = 0x6586864b4c6911b3c2e1f593efffffff;
+    const FQ_MODULUS: [u64; 4] =
+        [0x3c208c16d87cfd47, 0x97816a916871ca8d, 0xb85045b68181585d, 0x30644e72e131a029];
+    const FQ_R2: [u64; 4] =
+        [0xf32cfc5b538afa89, 0xb5e71911d44501fb, 0x47ab1eff0a417ff6, 0x06d89f71cab8351f];
+    const FQ_INV: u128 = 0x9ede7d651eca6ac987d20782e4866389;
+
+    if *modulo == U256::from(FQ_MODULUS) {
+        Some((U256::from(FQ_R2), FQ_INV))
+    } else if *modulo == U256::from(FR_MODULUS) {
+        Some((U256::from(FR_R2), FR_INV))
+    } else {
+        None
+    }
+}
+
+// Montgomery reduction from upstream substrate-bn 0.6.0 (HAC Algorithm 14.32):
+// `this = this * by * R^-1 mod modulus`, result in [0, 2*modulus).
+#[cfg(not(target_os = "zkvm"))]
+#[inline]
+fn mul_reduce(this: &mut [u128; 2], by: &[u128; 2], modulus: &[u128; 2], inv: u128) {
+    let mut res = [0; 2 * 2];
+    unroll! {
+        for i in 0..2 {
+            mac_digit(i, &mut res, by, this[i]);
+        }
+    }
+
+    unroll! {
+        for i in 0..2 {
+            let k = inv.wrapping_mul(res[i]);
+            mac_digit(i, &mut res, modulus, k);
+        }
+    }
+
+    this.copy_from_slice(&res[2..]);
 }
 
 #[test]
@@ -859,4 +929,61 @@ fn test_from_slice() {
     let rhs = U256::from_slice(&[1]).unwrap();
 
     assert_eq!(lhs, rhs);
+}
+
+// The native Montgomery path of `cpu_mul` must agree bit-for-bit with the original
+// schoolbook + `divrem` path for both BN254 moduli, including the edge values.
+#[cfg(all(test, not(target_os = "zkvm")))]
+mod native_fast_mul_tests {
+    use super::*;
+
+    fn divrem_mul(a: &U256, b: &U256, modulo: &U256) -> U256 {
+        let mut res = [0u128; 4];
+        unroll! {
+            for i in 0..2 {
+                mac_digit(i, &mut res, &b.0, a.0[i]);
+            }
+        }
+        U512(res).divrem(modulo).1
+    }
+
+    #[test]
+    fn montgomery_cpu_mul_matches_divrem() {
+        let rng = &mut ::rand::thread_rng();
+        let moduli = [
+            U256::from([0x43e1f593f0000001, 0x2833e84879b97091, 0xb85045b68181585d, 0x30644e72e131a029]),
+            U256::from([0x3c208c16d87cfd47, 0x97816a916871ca8d, 0xb85045b68181585d, 0x30644e72e131a029]),
+        ];
+        for m in &moduli {
+            assert!(montgomery_params(m).is_some());
+            let mut m1 = *m;
+            m1.sub(&U256::one(), m); // p - 1
+            let edges = [U256::zero(), U256::one(), m1];
+            let mut cases: alloc::vec::Vec<(U256, U256)> = alloc::vec::Vec::new();
+            for a in &edges {
+                for b in &edges {
+                    cases.push((*a, *b));
+                }
+            }
+            for _ in 0..200_000 {
+                cases.push((U256::random(rng, m), U256::random(rng, m)));
+            }
+            for (a, b) in cases {
+                let mut fast = a;
+                fast.cpu_mul(&b, m);
+                assert_eq!(fast, divrem_mul(&a, &b, m), "a={a:?} b={b:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn other_moduli_and_unreduced_operands_keep_the_divrem_path() {
+        let m = U256::from([0xffffffffffffffff; 4]);
+        assert!(montgomery_params(&m).is_none());
+        let fq = U256::from([0x3c208c16d87cfd47, 0x97816a916871ca8d, 0xb85045b68181585d, 0x30644e72e131a029]);
+        let big = U256::from([0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0x3fffffffffffffff]);
+        let mut fast = big;
+        fast.cpu_mul(&U256::one(), &fq);
+        assert_eq!(fast, divrem_mul(&big, &U256::one(), &fq));
+    }
 }
