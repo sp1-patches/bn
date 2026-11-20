@@ -198,7 +198,8 @@ pub enum Error {
 }
 
 impl U256 {
-    /// Initialize U256 from slice of bytes (big endian)
+    /// Accepts up to 32 big-endian bytes, padding shorter inputs with leading zeros.
+    /// Empty input is zero. The original crate requires exactly 32 bytes.
     pub fn from_slice(s: &[u8]) -> Result<U256, Error> {
         let mut padded = [0u8; 32];
 
@@ -325,7 +326,16 @@ impl U256 {
         *self = r;
     }
 
-    /// Multiply `self` by `other` (mod `modulo`)
+    /// Multiplies `self` by `other` modulo `modulo`.
+    ///
+    /// On SP1, a nonzero modulus requires `self * other < 2^256 * modulo`,
+    /// using the full integer product. This holds if either operand is below
+    /// the modulus. The caller must ensure this bound or the execution cannot
+    /// be proved. A zero modulus means wrapping multiplication modulo `2^256`
+    /// on SP1 only.
+    ///
+    /// On native targets, use a nonzero modulus below `2^254`, as required
+    /// by the software division routine. Both built-in BN moduli satisfy this.
     pub fn mul(&mut self, other: &U256, modulo: &U256) {
         #[cfg(target_os = "zkvm")]
         {

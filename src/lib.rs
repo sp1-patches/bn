@@ -45,6 +45,8 @@ impl Fr {
     pub fn interpret(buf: &[u8; 64]) -> Fr {
         Fr(fields::Fr::interpret(buf))
     }
+    /// Accepts up to 32 big-endian bytes, padding shorter inputs with leading zeros.
+    /// Empty input is zero. The original crate requires exactly 32 bytes.
     pub fn from_slice(slice: &[u8]) -> Result<Self, FieldError> {
         arith::U256::from_slice(slice)
             .map_err(|_| FieldError::InvalidSliceLength) // todo: maybe more sensful error handling
@@ -78,6 +80,10 @@ impl Fr {
     pub fn into_u256(self) -> arith::U256 {
         (self.0).into()
     }
+    /// Sets or clears a bit in the field element's integer value.
+    /// The original crate edits the bits of its Montgomery representation instead.
+    /// For example, setting bit 0 of zero produces one in this patch.
+    /// This method does not reduce the result modulo the field modulus.
     pub fn set_bit(&mut self, bit: usize, to: bool) {
         self.0.set_bit(bit, to);
     }
@@ -221,6 +227,8 @@ impl Fq {
     pub fn interpret(buf: &[u8; 64]) -> Fq {
         Fq(fields::Fq::interpret(buf))
     }
+    /// Accepts up to 32 big-endian bytes, padding shorter inputs with leading zeros.
+    /// Empty input is zero. The original crate requires exactly 32 bytes.
     pub fn from_slice(slice: &[u8]) -> Result<Self, FieldError> {
         arith::U256::from_slice(slice)
             .map_err(|_| FieldError::InvalidSliceLength) // todo: maybe more sensful error handling
@@ -623,11 +631,7 @@ impl Into<G1> for AffineG1 {
 
 impl Into<AffineG1> for G1 {
     fn into(self) -> AffineG1 {
-        AffineG1(
-            self.0
-                .to_affine()
-                .expect("Unable to convert G1 to AffineG1"),
-        )
+        AffineG1::from_jacobian(self).unwrap_or_else(AffineG1::zero)
     }
 }
 
@@ -907,8 +911,17 @@ impl From<AffineG2> for G2 {
 }
 
 impl From<G2> for AffineG2 {
+    /// Converts a valid G2 subgroup point from Jacobian to affine coordinates.
+    /// Maps the point at infinity to `AffineG2::zero()`.
+    ///
+    /// Finite points are checked for curve and subgroup membership after normalization.
+    /// Panics if a finite point fails either check.
     fn from(g2: G2) -> Self {
-        AffineG2::new(g2.x() / g2.z(), g2.y() / g2.z()).expect("Unable to convert G2 to AffineG2")
+        match Self::from_jacobian(g2) {
+            None => Self::zero(),
+            Some(p) => Self::new(p.x(), p.y())
+                .expect("G2 point must be on the curve and in the subgroup"),
+        }
     }
 }
 
