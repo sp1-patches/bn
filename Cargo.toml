@@ -1,6 +1,6 @@
 [package]
 name = "substrate-bn-succinct-rs"
-version = "0.6.1"
+version = "0.6.2"
 authors = [
     "Sean Bowe <ewillbefull@gmail.com>",
     "Parity Technologies <admin@parity.io>",
